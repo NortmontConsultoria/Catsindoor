@@ -145,7 +145,7 @@ const BarValuePlugin={id:'barValue',afterDatasetsDraw(chart,args,opts){
     chart.data.datasets.forEach((ds,di)=>{
       const meta=chart.getDatasetMeta(di);if(meta.hidden)return;
       meta.data.forEach((el,i)=>{
-        const val=ds.data[i];if(val==null||val<(opts.minVal||0))return;
+        const val=ds.data[i];if(val==null||(val<(opts.minVal||0)&&!(opts.neg&&val<0)))return;
         if(ds._parcial && i===ds._parcial.idx) return;   // rótulo desenhado pelo dashedBar
         (byIndex[i]=byIndex[i]||[]).push({el,val,dsLabel:ds.label,idx:i});
       });
@@ -156,6 +156,7 @@ const BarValuePlugin={id:'barValue',afterDatasetsDraw(chart,args,opts){
       pts.forEach(p=>{
         const txt=opts.fmt?opts.fmt(p.val,p.dsLabel,p.idx):String(p.val);
         const w=ctx.measureText(txt).width;
+        if(p.val<0){ctx.save();ctx.fillStyle=opts.color||'#0a1a33';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(txt,p.el.x,p.el.y+3);ctx.restore();return;}
         let y=p.el.y-3;
         // Se colidir com um rótulo já posicionado (de valor MAIOR, pois processamos em ordem
         // decrescente), empurra só para baixo, nunca para cima. Garante que valor maior
@@ -955,9 +956,10 @@ table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
 <div class="tab-panel" id="tab-orc">
   <div class="sec">
     <div class="sec-title">Orçamento 2026</div>
-    <div class="sec-sub">Mapa Orçamentário · Meta 2026 × Realizado 2026 (YTD) × Realizado 2025</div>
+    <div class="sec-sub">Mapa Orçamentário · Meta 2026 × Realizado 2026 (YTD)</div>
+    <div class="note" id="orc-aviso-dre" style="display:none"></div>
     <div class="krow" id="orc-kpis"></div>
-    <div class="topic">Meta 2026 vs. Realizado 2026 (anualizado) vs. Realizado 2025: linhas-chave</div>
+    <div class="topic">Meta 2026 vs. Realizado 2026 (anualizado): linhas-chave</div>
     <div class="cgrid">
       <div class="cc full">
         <div class="chart-header"><span class="chart-title">Comparativo anual: Receita, Lucro Bruto, Resultado Operacional, Lucro Líquido</span></div>
@@ -1113,14 +1115,39 @@ table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
       </div>
     </div>
     <div class="topic" id="topic-mix-grupo">Receita por Grupo (Mai/26)</div>
+    <div class="rank-controls-row">
+      <div class="rank-toggle-bar" id="mtb-tipo">
+        <button class="rank-chip active" data-tipo="all" onclick="setMixTipo('all')">Todos</button>
+        <button class="rank-chip" data-tipo="Serviço" onclick="setMixTipo('Serviço')">Serviços</button>
+        <button class="rank-chip" data-tipo="Produto" onclick="setMixTipo('Produto')">Produtos</button>
+      </div>
+    </div>
     <div class="tw" id="mix-tw"></div>
+    <div class="topic">Top 30 Produtos &amp; Serviços</div>
+    <div class="rank-controls-row">
+      <div class="rank-toggle-bar" id="rtb-prod">
+        <button class="rank-chip" onclick="setRankN('prod',5)">Top 5</button>
+        <button class="rank-chip" onclick="setRankN('prod',10)">Top 10</button>
+        <button class="rank-chip" onclick="setRankN('prod',15)">Top 15</button>
+        <button class="rank-chip active" onclick="setRankN('prod',30)">Total (30)</button>
+      </div>
+      <div class="rank-toggle-bar" id="rtb-tipo">
+        <button class="rank-chip active" onclick="setRankTipo('all')">Todos</button>
+        <button class="rank-chip" onclick="setRankTipo('Serviço')">Serviços</button>
+        <button class="rank-chip" onclick="setRankTipo('Produto')">Produtos</button>
+      </div>
+      <input class="rank-search" id="search-prod" type="text" placeholder="🔍 Buscar produto ou grupo…" oninput="setRankSearch('prod',this.value)">
+    </div>
+    <div id="rank-prod-kpi"></div>
+    <div class="tw" id="rank-prod-tw"></div>
+    <div class="editorial" id="mix-prod-editorial" style="margin-top:10px"></div>
   </div>
 </div>
 
 <div class="tab-panel" id="tab-rank">
   <div class="sec">
     <div class="sec-title">Rankings</div>
-    <div class="sec-sub" id="sub-rank">Top tutores, bairros e produtos · Mai/26</div>
+    <div class="sec-sub" id="sub-rank">Top tutores e bairros · Mai/26</div>
 
     <div class="topic">Top 25 Tutores: Concentração de Receita</div>
     <div class="rank-controls-row">
@@ -1149,23 +1176,6 @@ table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
     <div id="rank-geo-kpi"></div>
     <div class="tw" id="rank-geo-tw"></div>
 
-    <div class="topic">Top 30 Produtos &amp; Serviços</div>
-    <div class="rank-controls-row">
-      <div class="rank-toggle-bar" id="rtb-prod">
-        <button class="rank-chip" onclick="setRankN('prod',5)">Top 5</button>
-        <button class="rank-chip" onclick="setRankN('prod',10)">Top 10</button>
-        <button class="rank-chip" onclick="setRankN('prod',15)">Top 15</button>
-        <button class="rank-chip active" onclick="setRankN('prod',30)">Total (30)</button>
-      </div>
-      <div class="rank-toggle-bar" id="rtb-tipo">
-        <button class="rank-chip active" onclick="setRankTipo('all')">Todos</button>
-        <button class="rank-chip" onclick="setRankTipo('Serviço')">Serviços</button>
-        <button class="rank-chip" onclick="setRankTipo('Produto')">Produtos</button>
-      </div>
-      <input class="rank-search" id="search-prod" type="text" placeholder="🔍 Buscar produto ou grupo…" oninput="setRankSearch('prod',this.value)">
-    </div>
-    <div id="rank-prod-kpi"></div>
-    <div class="tw" id="rank-prod-tw"></div>
 
     <div id="rank-insights"></div>
   </div>
@@ -1679,6 +1689,7 @@ function renderResumo(tid){
   const ml26=rb26?ll26/rb26:null;
   const fat26=sumFat(ms,"bruto"), fat25=ms.reduce((a,m)=>{const d=h25fat(m);return a+(d?.bruto||0);},0);
   const tut26=sumFat(ms,"tutores"), nov26=sumFat(ms,"novos");
+  const tut25=ms.reduce((a,m)=>a+(h25fat(m)?.tutores||0),0), nov25=ms.reduce((a,m)=>a+(h25fat(m)?.novos||0),0);
   const tkArr=ms.map(m=>D.fat26[m]?.tickTutor).filter(v=>v!=null);
   const tk26=tkArr.length?tkArr.reduce((a,b)=>a+b,0)/tkArr.length:null;
   const tkArr25=ms.map(m=>h25fat(m)?.tickTutor).filter(v=>v!=null);
@@ -1704,8 +1715,8 @@ function renderResumo(tid){
   ].join("");
   document.getElementById("re-com").innerHTML=[
     kpi("Faturamento",fmtRk(fat26),"kpi-feat","Regime vendas · acumulado",sig(fat26,fat25)),
-    kpi("Tutores Atendidos",fmtN(tut26),"","Período selecionado"),
-    kpi("Novos Clientes",fmtN(nov26),"","Total no período"),
+    kpi("Tutores Atendidos",fmtN(tut26),"",ms.length>1?"Soma dos meses (não únicos)":"Únicos no mês",sig(tut26,tut25)),
+    kpi("Novos Clientes",fmtN(nov26),"","Total no período",sig(nov26,nov25)),
     kpi("Ticket Médio/Tutor","R$ "+Math.round(tk26||0).toLocaleString("pt-BR"),"","Média mensal",sig(tk26,tk25))
   ].join("");
   document.getElementById("re-nps").innerHTML=[
@@ -1759,7 +1770,7 @@ function renderResumo(tid){
 
     // ── Comercial ──
     {
-      let t = `Faturamento de <strong class="st">${fmtRk(fat26)}</strong>${setaFat} no período, com <strong class="st">${fmtN(tut26)}</strong> tutores atendidos`;
+      let t = `Faturamento de <strong class="st">${fmtRk(fat26)}</strong>${setaFat} no período, com <strong class="st">${fmtN(tut26)}</strong> ${ms.length>1?"atendimentos de tutores (soma dos meses)":"tutores atendidos"}`;
       if(tk26) t += ` e ticket médio de <strong class="st">R$ ${Math.round(tk26).toLocaleString("pt-BR")}</strong> por tutor`;
       t += `.`;
       if(nov26!=null){
@@ -2746,7 +2757,7 @@ function renderFat(tid){
 
   document.getElementById("fat-kpis").innerHTML=[
     `<div class="kpi ok"><div class="kl">Faturamento Bruto</div><div class="kv">${fmtRk(fat26)}</div>${deltaHTML(delta(fat26,fat25))}<div class="ks">${isJulOnly?"Parcial até "+D.julProj.ateData:"Regime vendas"}</div></div>`,
-    `<div class="kpi"><div class="kl">Tutores Atendidos</div><div class="kv">${fmtN(t26)}</div><div class="ks">Únicos no período</div></div>`,
+    `<div class="kpi"><div class="kl">Tutores Atendidos</div><div class="kv">${fmtN(t26)}</div><div class="ks">${ms.length>1?"Soma dos meses (não únicos)":"Únicos no mês"}</div></div>`,
     `<div class="kpi ok"><div class="kl">Ticket Médio / Tutor</div><div class="kv">R$ ${Math.round(tk26||0).toLocaleString("pt-BR")}</div>${deltaHTML(delta(tk26,tk25))}<div class="ks">${isJulOnly?"Parcial":"Média mensal"}</div></div>`
   ].join("");
 
@@ -3061,8 +3072,51 @@ function renderMix(tid){
              legend:{position:"bottom",labels:{font:{size:12},boxWidth:12,padding:10}}},
     scales:{y:{stacked:true,ticks:{callback:v=>fmtRk(v)},grid:{color:"rgba(213,229,216,.09)"}},
              x:{stacked:true,grid:{display:false}}}}});
-  let mh="<table><thead><tr><th>#</th><th>Grupo</th><th class='r'>Receita</th><th class='r'>%</th><th class='r'>Itens</th><th class='r'>Tutores</th><th class='r'>Vendas</th></tr></thead><tbody>";
-  D.mix.forEach((m,i)=>mh+=`<tr><td>${i+1}</td><td>${m.g}</td><td class='r'>${fmtRk(m.r)}</td><td class='r'>${m.p.toFixed(1)}%</td><td class='r'>${m.it}</td><td class='r'>${m.tut}</td><td class='r'>${m.v}</td></tr>`);
+  renderMixTabela_();
+  renderRankProd();
+}
+
+/* Tipo do grupo (Serviço/Produto): vem da própria aba Top Produtos e Serviços,
+   pesado por receita, em todos os meses disponíveis. Grupo que não aparece lá
+   cai na regra por nome. */
+window.MIX_TIPO = window.MIX_TIPO || 'all';
+function tipoGrupo_(g){
+  if(!window.__TIPO_GRUPO){
+    const acc={};
+    ((D.detalhePorMes&&D.detalhePorMes.topProd)||[]).forEach(l=>{
+      const gr=l.Grupo, t=l.Tipo, r=Number(l['Receita (R$)'])||0;
+      if(!gr||!t) return;
+      acc[gr]=acc[gr]||{};
+      acc[gr][t]=(acc[gr][t]||0)+r;
+    });
+    window.__TIPO_GRUPO={};
+    Object.keys(acc).forEach(gr=>{
+      const o=acc[gr], tot=Object.values(o).reduce((a,b)=>a+b,0)||1;
+      const top=Object.keys(o).sort((a,b)=>o[b]-o[a])[0];
+      window.__TIPO_GRUPO[gr]={tipo:top, conf:o[top]/tot};
+    });
+  }
+  const hit=window.__TIPO_GRUPO[g];
+  if(hit) return hit.tipo;
+  return /farm[aá]c|insumo|revenda|ra[cç][aã]o|pet ?shop|acess[oó]rio|produto|medicamento|higiene/i.test(g||'') ? 'Produto' : 'Serviço';
+}
+function setMixTipo(t){ window.MIX_TIPO=t; renderMixTabela_(); }
+function renderMixTabela_(){
+  const T=window.MIX_TIPO;
+  document.querySelectorAll('#mtb-tipo .rank-chip').forEach(b=>b.classList.toggle('active',b.getAttribute('data-tipo')===T));
+  const tot=D.mix.reduce((a,m)=>a+(m.r||0),0);
+  const linhas=D.mix.map(m=>({...m,tipo:tipoGrupo_(m.g)})).filter(m=>T==='all'||m.tipo===T);
+  let mh="<table><thead><tr><th>#</th><th>Grupo</th><th>Tipo</th><th class='r'>Receita</th><th class='r'>%</th><th class='r'>Itens</th><th class='r'>Tutores</th><th class='r'>Vendas</th></tr></thead><tbody>";
+  linhas.forEach((m,i)=>{
+    const bg=m.tipo==='Serviço'?'#d9ecdc':'#dbe6f2', fg=m.tipo==='Serviço'?'#1f4a2e':'#16305c';
+    mh+=`<tr><td>${i+1}</td><td>${m.g}</td><td><span style='font-size:11px;padding:3px 11px;border-radius:8px;font-weight:800;white-space:nowrap;background:${bg};color:${fg}'>${m.tipo}</span></td><td class='r'>${fmtRk(m.r)}</td><td class='r'>${m.p.toFixed(1)}%</td><td class='r'>${m.it}</td><td class='r'>${m.tut}</td><td class='r'>${m.v}</td></tr>`;
+  });
+  if(!linhas.length) mh+="<tr><td colspan='8' style='text-align:center;padding:18px'>Nenhum grupo neste tipo</td></tr>";
+  else {
+    const sr=linhas.reduce((a,m)=>a+(m.r||0),0), si=linhas.reduce((a,m)=>a+(m.it||0),0), sv=linhas.reduce((a,m)=>a+(m.v||0),0);
+    const rot=T==='all'?'Total':(T==='Serviço'?'Total Serviços':'Total Produtos');
+    mh+=`<tr style='font-weight:800'><td></td><td>${rot}</td><td></td><td class='r'>${fmtRk(sr)}</td><td class='r'>${tot?(sr/tot*100).toFixed(1):'0.0'}%</td><td class='r'>${si}</td><td class='r'>–</td><td class='r'>${sv}</td></tr>`;
+  }
   document.getElementById("mix-tw").innerHTML=mh+"</tbody></table>";
 }
 
@@ -3072,20 +3126,20 @@ window.RANK_GEO_FILTER = null;
 window.RANK_TIPO      = 'all';
 window.RANK_SEARCH    = { tut: '', prod: '' };
 
-function setRankN(key, n){ window.RANK_N[key]=n; renderRank(); }
-function setRankTipo(tipo){ window.RANK_TIPO=tipo; renderRank(); }
+function setRankN(key, n){ window.RANK_N[key]=n; key==='prod'?renderRankProd():renderRank(); }
+function setRankTipo(tipo){ window.RANK_TIPO=tipo; renderRankProd(); }
 function setRankGeoFilter(bairro){
   window.RANK_GEO_FILTER = (window.RANK_GEO_FILTER===bairro||bairro===null) ? null : bairro;
   renderRank();
   if(window.RANK_GEO_FILTER) document.getElementById('rank-tut-tw').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
-function setRankSearch(key,val){ window.RANK_SEARCH[key]=val.toLowerCase().trim(); renderRank(); }
+function setRankSearch(key,val){ window.RANK_SEARCH[key]=val.toLowerCase().trim(); key==='prod'?renderRankProd():renderRank(); }
 
 // Mapa de calor: Top Bairros (Porto Alegre)
 window._bairroMap = null;
 function openBairroMap(){
   document.getElementById('bairro-modal').classList.add('open');
-  document.getElementById('bairro-modal-sub').textContent = 'Receita por bairro · '+D.mesNovos;
+  document.getElementById('bairro-modal-sub').textContent = 'Receita por bairro · '+rotuloDetalhe_();
   // Leaflet precisa do container visível e com tamanho definido antes de inicializar/recalcular
   setTimeout(renderBairroMap, 30);
 }
@@ -3194,7 +3248,17 @@ function aplicarDetalhePorPeriodo_(meses){
   const F = D.detalhePorMes;
   const M = meses.filter(m => m.endsWith("/26") || m.endsWith("/25"));
   if(!M.length) return;
-  D.detalheMeses = M;
+  // Só os meses que realmente existem nas abas de detalhe (hoje: Jun/26 em diante).
+  // Sem isso o título dizia "Jan/26 a Ago/26" com dado só de Jun a Ago.
+  const comDet = new Set((F.mix||[]).map(l=>String(l['Mês'])));
+  const MD = M.filter(m=>comDet.has(m));
+  D.detalheMeses = MD.length ? MD : M;
+  D.detalheCobertura = {semDetalhe: M.filter(m=>!comDet.has(m)), comDetalhe: MD,
+    todos: Array.from(comDet).filter(x=>x&&x!=="undefined")};
+  // Faturamento bruto dos meses com detalhe: denominador da Participação e do
+  // % Acumulado dos rankings (antes era a soma dos próprios itens ranqueados).
+  const fatDet = D.detalheMeses.reduce((a,m)=>a+(((D.fat26&&D.fat26[m])||(D.fat25&&D.fat25[m])||{}).bruto||0),0);
+  const pctFat = (v, pool) => { const den = fatDet || pool || 1; return Math.round(v/den*1000)/10; };
 
   // ---- Mix de Receita ----
   let mix = agregarDetalhe_(F.mix, M, {chave:l=>l.Grupo, rotulos:['Grupo'],
@@ -3217,11 +3281,12 @@ function aplicarDetalhePorPeriodo_(meses){
   tut = recalcPct_(tut, 'Receita (R$)', '% Participação');
   tut.sort((a,b)=>b['Receita (R$)']-a['Receita (R$)']);
   const totTut = tut.reduce((a,x)=>a+(x['Receita (R$)']||0),0) || 1;
+  tut.forEach(x => x['% Participação'] = pctFat(x['Receita (R$)']||0, totTut));
   let acc = 0;
   D.top25 = tut.slice(0,25).map((l,i)=>{
     acc += l['Receita (R$)'];
     return {rank:i+1, t:l.Tutor, b:l.Bairro||'', r:l['Receita (R$)'], p:l['% Participação'],
-      pa: Math.round(acc/totTut*1000)/10, vis:l.Visitas,
+      pa: pctFat(acc, totTut), vis:l.Visitas,
       an: M.length>1 ? Math.max(1, Math.round(l.Animais/M.length)) : l.Animais,
       tk: l.Visitas ? Math.round(l['Receita (R$)']/l.Visitas*100)/100 : 0};
   });
@@ -3232,11 +3297,12 @@ function aplicarDetalhePorPeriodo_(meses){
   prod = recalcPct_(prod, 'Receita (R$)', '% Participação');
   prod.sort((a,b)=>b['Receita (R$)']-a['Receita (R$)']);
   const totProd = prod.reduce((a,x)=>a+(x['Receita (R$)']||0),0) || 1;
+  prod.forEach(x => x['% Participação'] = pctFat(x['Receita (R$)']||0, totProd));
   let accP = 0;
   D.topProd = prod.slice(0,30).map((l,i)=>{
     accP += l['Receita (R$)'];
     return {rank:i+1, g:l.Grupo, tipo:l.Tipo, n:l['Produto/Serviço'], r:l['Receita (R$)'],
-      p:l['% Participação'], pa:Math.round(accP/totProd*1000)/10, it:l.Itens,
+      p:l['% Participação'], pa:pctFat(accP, totProd), it:l.Itens,
       tk: l.Itens ? Math.round(l['Receita (R$)']/l.Itens*100)/100 : 0};
   });
 
@@ -3304,38 +3370,39 @@ function aplicarDetalhePorPeriodo_(meses){
   D.segMes = ultimoM;
 }
 
+/* helpers dos rankings (globais: Rankings e Top 30 no Mix) */
+function mBar(val,maxVal){
+  const w=maxVal>0?Math.round(val/maxVal*100):0;
+  return `<div class="rbar-wrap"><div class="rbar-bg"><div class="rbar-fill" style="width:${w}%"></div></div><span class="rbar-val">${val.toFixed(1)}%</span></div>`;
+}
+function rowCls(i){
+  if(i===0) return 'rr1';
+  if(i===1) return 'rr2';
+  if(i===2) return 'rr3';
+  if(i<=4)  return 'rr45';
+  return '';
+}
+function segBadge(vis){
+  if(vis===1)  return '<span class="seg-badge seg-unica">Visita Única</span>';
+  if(vis<=5)   return '<span class="seg-badge seg-rec">Recorrente</span>';
+  return '<span class="seg-badge seg-heavy">Heavy User</span>';
+}
+function kpiBar(items){ return `<div class="rank-kpi-bar">${items.map(it=>`<div class="rank-kpi-item"><div class="rank-kpi-label">${it.l}</div><div class="rank-kpi-val">${it.v}</div>${it.s?`<div class="rank-kpi-sub">${it.s}</div>`:''}</div>`).join('')}</div>`; }
+function updToggles(barId,key){
+  document.querySelectorAll(`#${barId} .rank-chip`).forEach(btn=>{
+    const m=btn.getAttribute('onclick').match(/,(\d+)\)/);
+    if(m) btn.classList.toggle('active', parseInt(m[1])===window.RANK_N[key]);
+  });
+}
+
 function renderRank(){
   const RN=window.RANK_N, GF=window.RANK_GEO_FILTER;
   const TIPO=window.RANK_TIPO, SRCH=window.RANK_SEARCH;
   const lastM=D.M26[D.M26.length-1];
-  const fatTotal=D.fat26[lastM]?.bruto||null;
+  const mesesDet=(D.detalheMeses&&D.detalheMeses.length)?D.detalheMeses:[lastM];
+  const fatTotal=mesesDet.reduce((a,m)=>a+((D.fat26[m]||D.fat25[m]||{}).bruto||0),0)||null;
   const subRank=document.getElementById("sub-rank");
-  if(subRank) subRank.textContent="Top tutores, bairros e produtos · "+rotuloDetalhe_();
-
-  /* helpers */
-  function mBar(val,maxVal){
-    const w=maxVal>0?Math.round(val/maxVal*100):0;
-    return `<div class="rbar-wrap"><div class="rbar-bg"><div class="rbar-fill" style="width:${w}%"></div></div><span class="rbar-val">${val.toFixed(1)}%</span></div>`;
-  }
-  function rowCls(i){
-    if(i===0) return 'rr1';
-    if(i===1) return 'rr2';
-    if(i===2) return 'rr3';
-    if(i<=4)  return 'rr45';
-    return '';
-  }
-  function segBadge(vis){
-    if(vis===1)  return '<span class="seg-badge seg-unica">Visita Única</span>';
-    if(vis<=5)   return '<span class="seg-badge seg-rec">Recorrente</span>';
-    return '<span class="seg-badge seg-heavy">Heavy User</span>';
-  }
-  function kpiBar(items){ return `<div class="rank-kpi-bar">${items.map(it=>`<div class="rank-kpi-item"><div class="rank-kpi-label">${it.l}</div><div class="rank-kpi-val">${it.v}</div>${it.s?`<div class="rank-kpi-sub">${it.s}</div>`:''}</div>`).join('')}</div>`; }
-  function updToggles(barId,key){
-    document.querySelectorAll(`#${barId} .rank-chip`).forEach(btn=>{
-      const m=btn.getAttribute('onclick').match(/,(\d+)\)/);
-      if(m) btn.classList.toggle('active', parseInt(m[1])===window.RANK_N[key]);
-    });
-  }
+  if(subRank) subRank.textContent="Top tutores e bairros · "+rotuloDetalhe_();
 
   /* ---- TUTORES ---- */
   let tutData=D.top25.slice(0,RN.tut===999?25:RN.tut);
@@ -3354,7 +3421,7 @@ function renderRank(){
   const gfTagEl=document.getElementById('rank-geo-filter-tag');
   gfTagEl.innerHTML=GF?`<div class="geo-filter-tag">📍 Bairro: <strong>${GF}</strong> <button onclick="setRankGeoFilter(null)" title="Remover filtro">✕</button></div>`:'';
 
-  let th=`<table><thead><tr><th>#</th><th>Tutor</th><th>Bairro</th><th class='r'>Receita</th><th>Participação</th><th class='r'>% Acum.</th><th class='r'>Visitas (mês)</th><th class='r'>Animais</th><th class='r'>Tick./Vis.</th><th>Segmento (mês)</th></tr></thead><tbody>`;
+  let th=`<table><thead><tr><th>#</th><th>Tutor</th><th>Bairro</th><th class='r'>Receita</th><th>Participação</th><th class='r'>% Acum.</th><th class='r'>Visitas (${(D.detalheMeses&&D.detalheMeses.length>1)?'período':'mês'})</th><th class='r'>Animais</th><th class='r'>Tick./Vis.</th><th>Segmento (${(D.detalheMeses&&D.detalheMeses.length>1)?'período':'mês'})</th></tr></thead><tbody>`;
   tutData.forEach((t,i)=>{
     th+=`<tr class='${rowCls(i)}'><td><strong>${t.rank}</strong></td><td>${t.t}</td><td>${t.b}</td><td class='r'>${fmtRk(t.r)}</td><td>${mBar(t.p,maxTP)}</td><td class='r'>${t.pa.toFixed(1)}%</td><td class='r'>${t.vis}</td><td class='r'>${t.an}</td><td class='r'>R$ ${t.tk.toFixed(0)}</td><td>${segBadge(t.vis)}</td></tr>`;
   });
@@ -3383,6 +3450,30 @@ function renderRank(){
   document.getElementById('rank-geo-tw').innerHTML=gh+'</tbody></table>';
   updToggles('rtb-geo','geo');
 
+  /* ---- LEITURA (tudo calculado; sem nomes ou números fixos) ---- */
+  const per=rotuloDetalhe_();
+  const t5=D.top25.slice(0,5).reduce((a,t)=>a+(t.r||0),0);
+  const t10=D.top25.slice(0,10).reduce((a,t)=>a+(t.r||0),0);
+  const topBairro=D.geo&&D.geo.length?D.geo[0]:null;
+  const monoTut=(D.geo||[]).filter(g=>g.b!=='Outros'&&g.tut===1&&g.p>=1).sort((x,y)=>y.r-x.r);
+  const heavyCount=D.top25.filter(t=>(t.vis||0)>=6).length;
+  let ed='';
+  if(t5>0&&fatTotal) ed+=`Os <strong class="st">5 maiores tutores</strong> respondem por <strong class="st warn">${fmtP(t5/fatTotal*100)}</strong> do faturamento de ${per}${(t10&&D.top25.length>5)?`, e os 10 maiores por <strong class="st">${fmtP(t10/fatTotal*100)}</strong>`:''}. `;
+  if(topBairro) ed+=`<strong class="st">${topBairro.b}</strong> lidera entre os bairros com <strong class="st">${fmtP(topBairro.p)}</strong> da receita e ${topBairro.tut} tutor${topBairro.tut===1?'':'es'}. `;
+  if(monoTut.length) ed+=`${monoTut.length===1?'O bairro':'Os bairros'} <strong class="st">${monoTut.slice(0,3).map(g=>g.b).join(', ')}</strong> ${monoTut.length===1?'depende':'dependem'} de um único tutor${monoTut.length>1?' (cada um com 1% ou mais da receita)':', com 1% ou mais da receita'}. `;
+  if(heavyCount>0) ed+=`<strong class="st">${heavyCount} tutor${heavyCount>1?'es':''}</strong> do Top 25 ${heavyCount>1?'tiveram':'teve'} 6 ou mais visitas em ${per}.`;
+  document.getElementById('rank-insights').innerHTML=
+    '<div class="rank-insights-title">Análise · Rankings '+per+'</div>'+
+    '<div class="editorial" style="margin-top:8px">'+ed+'</div>';
+}
+
+/* Top 30 Produtos e Serviços — exibido em Comercial › Mix de Receita */
+function renderRankProd(){
+  if(!document.getElementById('rank-prod-tw')) return;
+  const RN=window.RANK_N, TIPO=window.RANK_TIPO, SRCH=window.RANK_SEARCH;
+  const lastM=D.M26[D.M26.length-1];
+  const mesesDet=(D.detalheMeses&&D.detalheMeses.length)?D.detalheMeses:[lastM];
+  const fatTotal=mesesDet.reduce((a,m)=>a+((D.fat26[m]||D.fat25[m]||{}).bruto||0),0)||null;
   /* ---- PRODUTOS ---- */
   let prodBase=TIPO==='all'?D.topProd:D.topProd.filter(p=>p.tipo===TIPO);
   if(SRCH.prod) prodBase=prodBase.filter(p=>p.n.toLowerCase().includes(SRCH.prod)||p.g.toLowerCase().includes(SRCH.prod));
@@ -3414,42 +3505,21 @@ function renderRank(){
   document.getElementById('rank-prod-tw').innerHTML=ph+'</tbody></table>';
   updToggles('rtb-prod','prod');
 
-  /* ---- INSIGHTS ---- */
-  const t5pct=D.top25.slice(0,5).reduce((a,t)=>a+t.p,0);
-  const t10pct=D.top25.slice(0,10).reduce((a,t)=>a+t.p,0);
-  const gatoteca=D.top25.find(t=>t.t.includes('Gatoteca'));
-  const geo2=D.geo[1], vilaI=D.geo.find(g=>g.b==='Vila Imbuhy');
-  const p5pct=D.topProd.slice(0,5).reduce((a,p)=>a+p.p,0);
-  const p10pct=D.topProd.slice(0,10).reduce((a,p)=>a+p.p,0);
-  const topTk=[...D.topProd].sort((a,b)=>b.tk-a.tk)[0];
-  const nFarm=D.topProd.filter(p=>p.tipo==='Produto').length;
-
-  const ins=[
-    {t:'warn', l:'Concentração de tutores: risco de churn',
-     tx:`Os <strong>5 maiores tutores</strong> somam <strong>${t5pct.toFixed(1)}%</strong> da receita; os 10 maiores chegam a <strong>${t10pct.toFixed(1)}%</strong>. Natália Tussi, Felipe Agiova e Andressa Barbachan representam juntos R$ 40,7k. Perder qualquer um é impacto imediato de 3–4% no faturamento. Ação: programa de fidelização VIP com benefícios escalonados para os Top 10.`},
-    {t:'info', l:gatoteca?'Outlier de frequência: oportunidade de upsell':'Alta frequência, baixo ticket',
-     tx:gatoteca?`<strong>${gatoteca.t}</strong> (rank ${gatoteca.rank}) visitou <strong>${gatoteca.vis} vezes</strong> no mês, mais que qualquer outro no Top 15, mas tem o menor Ticket/Visita do grupo: <strong>R$ ${gatoteca.tk.toFixed(0)}</strong>. Alta frequência indica vínculo forte com a clínica. Um produto ou serviço adicional por consulta (suplemento, exame preventivo) poderia elevar o ticket em 40–60% sem esforço de aquisição.`:'Alta frequência com ticket baixo é oportunidade clássica de upsell: identificar esses tutores e oferecer pacotes.'},
-    {t:'risk', l:'Vulnerabilidade geográfica: bairros mono-tutor',
-     tx:vilaI?`<strong>Vila Imbuhy</strong> gera R$ ${fmtRk(vilaI.r)} (<strong>${vilaI.p.toFixed(1)}%</strong> da receita) apoiado em <strong>1 único tutor</strong>. Se sair, zera. Chapadão das Pedras e Farroupilha têm 2 tutores cada, mesma fragilidade. Estratégia: ativar indicação nesses bairros para criar uma segunda âncora antes de perder a primeira.`:'Bairros com 1–2 tutores concentram risco alto de churn total de receita geográfica.'},
-    {t:'good', l:`${geo2?.b||'2º bairro'}: maior potencial de expansão`,
-     tx:geo2?`<strong>${geo2.b}</strong> tem o 2º maior ticket médio por tutor (<strong>R$ ${geo2.tk.toFixed(0)}</strong>) com apenas <strong>${geo2.tut} tutores</strong>. A base é pequena mas de alto valor. O crescimento aqui tem ROI superior ao bairro líder (Petrópolis, 32 tutores já saturado). Ação: campanha de indicação geolocalizada para Rio Branco.`:'O 2º bairro em receita tem o maior potencial de expansão pela combinação de alto ticket e base pequena.'},
-    {t:'warn', l:'Dependência de internação e consultas',
-     tx:`Top 5 produtos = <strong>${p5pct.toFixed(1)}%</strong> da receita; Top 10 = <strong>${p10pct.toFixed(1)}%</strong>. Internação e Consultas dominam: são serviços reativos que dependem de animal enfermo. Diversificação para serviços preventivos (check-ups, vacinas, odonto) reduz exposição à sazonalidade de urgências e cria receita previsível.`},
-    {t:'good', l:'Serviços de alto ticket com volume a escalar',
-     tx:topTk?`<strong>${topTk.n}</strong> tem o maior ticket unitário do Top 30 (R$ ${topTk.tk.toFixed(0)}) com apenas <strong>${topTk.it} itens</strong>, há espaço para crescer sem custo de aquisição. Dos 30 itens ranqueados, apenas <strong>${nFarm} são produtos de farmácia</strong>: o canal Farmácia pesa 11% no mix geral mas não aparece em SKUs individuais de alto valor. Protocolo de prescrição ativa sobe essa posição.`:'Serviços de alto ticket com baixo volume são alavancas de receita com custo marginal baixo.'}
-  ];
-
-  const top5tot=D.top25&&D.top25.length>=5?D.top25.slice(0,5).reduce((a,t)=>a+(t.r||0),0):0;
-  const fatTot=D.top25?D.top25.reduce((a,t)=>a+(t.r||0),0):0;
-  const topBairro=D.geo&&D.geo.length?D.geo[0]:null;
-  const heavyCount=D.top25?D.top25.filter(t=>(t.vis||0)>=6).length:0;
-  document.getElementById('rank-insights').innerHTML=
-    '<div class="rank-insights-title">Análise · Rankings '+lastM+'</div>'+
-    '<div class="editorial" style="margin-top:8px">'+
-    (top5tot>0&&fatTot>0?`Os <strong class="st">5 maiores tutores</strong> respondem por <strong class="st warn">${fmtP(top5tot/fatTot*100)}</strong> do faturamento do mês: concentração que representa risco real se 2–3 saírem ou reduzirem frequência. `:'') +
-    (topBairro?`O bairro <strong class="st">${topBairro.b}</strong> lidera geograficamente com <strong class="st">${fmtP(topBairro.p)}</strong> do faturamento, sugerindo onde concentrar ações de marketing local. `:'') +
-    (heavyCount>0?`<strong class="st">${heavyCount} Heavy User${heavyCount>1?'s':''}</strong> (6+ visitas em ${lastM}) na lista top, base de maior rentabilidade e menor custo de retenção que qualquer novo cliente.`:'') +
-    '</div>';
+  /* leitura calculada */
+  const per=rotuloDetalhe_();
+  const p5=D.topProd.slice(0,5).reduce((a,x)=>a+(x.r||0),0);
+  const p30=D.topProd.reduce((a,x)=>a+(x.r||0),0);
+  const lider=D.topProd[0];
+  const comIt=D.topProd.filter(x=>x.it>=5);
+  const topTk=comIt.length?[...comIt].sort((x,y)=>y.tk-x.tk)[0]:null;
+  let ed='';
+  if(fatTotal&&p30){
+    ed+=`Os <strong class="st">5 maiores itens</strong> somam <strong class="st">${fmtP(p5/fatTotal*100)}</strong> do faturamento de ${per}, e os ${D.topProd.length} ranqueados cobrem <strong class="st">${fmtP(p30/fatTotal*100)}</strong>; o restante está pulverizado em itens fora do ranking. `;
+  }
+  if(lider) ed+=`<strong class="st">${lider.n}</strong> (${lider.g}) lidera com ${fmtRk(lider.r)}. `;
+  if(topTk) ed+=`Entre os itens com 5 ou mais unidades, o maior ticket é <strong class="st">${topTk.n}</strong> (R$ ${topTk.tk.toFixed(0)} em ${topTk.it} itens).`;
+  const edEl=document.getElementById('mix-prod-editorial');
+  if(edEl) edEl.innerHTML=ed;
 }
 
 function renderVet(tid){
@@ -3482,11 +3552,20 @@ function renderVet(tid){
 }
 
 /* Comissão % RB e composição de Pessoal, exibidos em Financeiro > Resultado */
-function renderVetFinCharts(){
+function renderVetFinCharts(ms){
   if(!document.getElementById("ch-vetpct")) return;
-  const pctArr=D.M26.map((_,i)=>{
-    const rb=D.dre26["Receita Bruta"][i]||0;
-    const c=(D.dre26["Veterinários Terceirizados"][i]||0)+(D.dre26["Veterinários Rotina e Plantão"][i]||0);
+  ms=(ms&&ms.length)?ms:D.M26;
+  // valor de uma linha do DRE num mês de 2026 ou de 2025
+  const dv=(key,m)=>{
+    if(String(m).endsWith("/26")){ const i=D.M26.indexOf(m); return i>=0?((D.dre26[key]||[])[i]):null; }
+    const i=D.M25.indexOf(m); return i>=0?((D.dre25[key]||[])[i]):null;
+  };
+  const num=v=>(v==null||v==="")?0:Number(v)||0;
+  const temRB=m=>{const v=dv("Receita Bruta",m);return v!=null&&v!=="";};
+  const pctArr=ms.map(m=>{
+    if(!temRB(m)) return null;
+    const rb=num(dv("Receita Bruta",m));
+    const c=num(dv("Veterinários Terceirizados",m))+num(dv("Veterinários Rotina e Plantão",m));
     return rb?+(c/rb*100).toFixed(1):null;
   });
   const pct25Arr=D.M25.map((_,i)=>{
@@ -3496,31 +3575,31 @@ function renderVetFinCharts(){
   });
   const pct25Valid=pct25Arr.filter(v=>v!=null);
   const avg25=pct25Valid.length?+(pct25Valid.reduce((a,v)=>a+v,0)/pct25Valid.length).toFixed(1):null;
-  const ds26vet=D.M26.map((_,i)=>D.dre26["Veterinários Terceirizados"][i]||0);
-  const ds26rot=D.M26.map((_,i)=>D.dre26["Veterinários Rotina e Plantão"][i]||0);
+  const so25=ms.every(m=>String(m).endsWith("/25"));
+  const ds=key=>ms.map(m=>temRB(m)?num(dv(key,m)):null);
 
-  mkChart("ch-vetpct",{type:"line",data:{labels:D.M26,datasets:[
-    {label:"% Comissão 2026",data:pctArr,borderColor:"#7fb0d9",backgroundColor:"rgba(127,176,217,.18)",fill:true,tension:.35,
-     pointRadius:4,pointBackgroundColor:"#7fb0d9",order:1},
-    ...(avg25!=null?[{label:"Média 2025 ("+avg25+"%)",data:D.M26.map(()=>avg25),
-      borderColor:"rgba(47,143,110,.5)",backgroundColor:"transparent",
-      borderWidth:1.5,borderDash:[6,4],pointRadius:0,order:2}]:[])
+  mkChart("ch-vetpct",{type:"line",data:{labels:ms,datasets:[
+    {label:"% Comissão",data:pctArr,borderColor:"#1d3863",backgroundColor:"rgba(29,56,99,.10)",fill:true,tension:.35,
+     borderWidth:2.5,pointRadius:4,pointBackgroundColor:"#1d3863",spanGaps:true,order:1},
+    ...(avg25!=null&&!so25?[{label:"Média 2025 ("+avg25+"%)",data:ms.map(()=>avg25),
+      borderColor:"#ba7517",backgroundColor:"transparent",
+      borderWidth:2,borderDash:[6,4],pointRadius:0,order:2}]:[])
   ]},options:{responsive:true,maintainAspectRatio:false,
     plugins:{
-      legend:{display:avg25!=null, position:"bottom", labels:{font:{size:9}, boxWidth:12, padding:8,
+      legend:{display:avg25!=null&&!so25, position:"bottom", labels:{font:{size:9}, boxWidth:12, padding:8,
         filter:(item)=>item.datasetIndex===1}},
       tooltip:{callbacks:{label:ctx=>ctx.dataset.label+": "+ctx.parsed.y+"%"}}
     },
-    scales:{y:{ticks:{callback:v=>v+"%"},grid:{color:"rgba(213,229,216,.09)"}},x:{grid:{display:false}}}
+    scales:{y:{ticks:{callback:v=>v+"%"},grid:{color:"rgba(10,26,51,.07)"}},x:{grid:{display:false}}}
   }});
 
-  mkChart("ch-pessoal",{type:"bar",data:{labels:D.M26,datasets:[
-    {label:"Pessoal",data:D.M26.map((_,i)=>D.dre26["Pessoal"][i]||0),backgroundColor:"rgba(213,229,216,.82)",stack:"a",borderRadius:3},
-    {label:"Com. Vet",data:ds26vet,backgroundColor:"rgba(127,176,217,.72)",stack:"a",borderRadius:3},
-    {label:"Rotina e Plantão",data:ds26rot,backgroundColor:"rgba(47,143,110,.6)",stack:"a",borderRadius:3}
+  mkChart("ch-pessoal",{type:"bar",data:{labels:ms,datasets:[
+    {label:"Pessoal",data:ds("Pessoal"),backgroundColor:"#163834",stack:"a",borderRadius:3},
+    {label:"Com. Vet",data:ds("Veterinários Terceirizados"),backgroundColor:"#1d3863",stack:"a",borderRadius:3},
+    {label:"Rotina e Plantão",data:ds("Veterinários Rotina e Plantão"),backgroundColor:"#5a8c5e",stack:"a",borderRadius:3}
   ]},options:{responsive:true,maintainAspectRatio:false,
     plugins:{legend:{position:"bottom",labels:{font:{size:9}}},barValue:{enabled:true,stacked:true,minVal:15000,minH:16,color:"#fff",fmt:v=>fmtRk(v)}},
-    scales:{y:{stacked:true,ticks:{callback:v=>fmtRk(v)},grid:{color:"rgba(213,229,216,.09)"}},x:{stacked:true,grid:{display:false}}}
+    scales:{y:{stacked:true,beginAtZero:true,ticks:{callback:v=>fmtRk(v)},grid:{color:"rgba(10,26,51,.07)"}},x:{stacked:true,grid:{display:false}}}
   }});
 }
 
@@ -3842,9 +3921,9 @@ function renderFinCharts(tid){
     const cvMin=cvPcts.length?Math.min(...cvPcts):null,cvMax=cvPcts.length?Math.max(...cvPcts):null,cvMed=rb_i?Math.round(cv_i/rb_i*100):null;
     const gastoPessoas=pe_i+vet_i,pctPessoas=rb_i?Math.round(gastoPessoas/rb_i*100):null,pctAdm=rb_i?Math.round(adm_i/rb_i*100):null;
     const lbl=ms.length===1?ms[0]:`${ms[0]}–${ms[ms.length-1]}`;
-    insEl.innerHTML=`<div class="editorial">${cvMin!=null&&cvMax!=null&&(cvMax-cvMin)>10?`O Custo de Venda variou de <strong class="st">${cvMin}%</strong> a <strong class="st warn">${cvMax}%</strong> da receita em ${lbl}, amplitude de ${(cvMax-cvMin).toFixed(0)}pp explicada por calendário de repasses, não por mudança estrutural (média do período: ~${cvMed}%). `:`Custo de Venda estável em ~<strong class="st">${cvMed}%</strong> da Receita Bruta em ${lbl}. `}Gasto total com pessoas: <strong class="st">${fmtRk(gastoPessoas)}</strong>${pctPessoas?` (<strong class="st ${pctPessoas>52?'warn':'up'}">${pctPessoas}%</strong> da receita)`:''}. Despesas administrativas respondem por apenas <strong class="st">${pctAdm}%</strong>: o alavancador real de margem é produtividade clínica por consulta, não corte de overhead.</div>`;
+    insEl.innerHTML=`<div class="editorial">${cvMin!=null&&cvMax!=null&&(cvMax-cvMin)>10?`O Custo de Venda variou de <strong class="st">${cvMin}%</strong> a <strong class="st warn">${cvMax}%</strong> da receita em ${lbl}, amplitude de ${(cvMax-cvMin).toFixed(0)}pp (média do período: ~${cvMed}%). Como o DRE é de caixa, vale conferir se a oscilação vem das datas de pagamento antes de tratá-la como mudança de custo. `:`Custo de Venda estável em ~<strong class="st">${cvMed}%</strong> da Receita Bruta em ${lbl}. `}Gasto total com pessoas: <strong class="st">${fmtRk(gastoPessoas)}</strong>${pctPessoas?` (<strong class="st ${pctPessoas>52?'warn':'up'}">${pctPessoas}%</strong> da receita)`:''}. Despesas administrativas: <strong class="st">${pctAdm}%</strong> da receita.${(pctPessoas&&pctAdm&&pctPessoas>=pctAdm*3)?` Pessoal pesa ${(pctPessoas/pctAdm).toFixed(1).replace(".",",")} vezes mais que o administrativo, então é a linha em que a margem é mais sensível.`:''}</div>`;
   }
-  renderVetFinCharts();
+  renderVetFinCharts(ms);
 }
 
 
@@ -3934,7 +4013,12 @@ function setChartTheme(tid){
 const ORC_CUSTO_KEYS=new Set(["Impostos e Deduções","Custo de Venda","Exames Lab. Terceirizados","Fornecedores de Produtos","Serviços Terceirizados","Despesas Operacionais","Administrativas","Pessoal","Marketing e Vendas","Despesas Financeiras","Investimentos e Provisões","Empréstimos","Invest. em Equipamento","Investimentos Gerais","Juros e Encargos","IRPJ / CSLL"]);
 
 function renderOrcamento(){
-  const M=D.M26; // orçamento é sempre acumulado do ano até o mês mais recente disponível
+  // Acumulado do ano só com meses que têm DRE lançada. Se o comercial fechar
+  // antes do financeiro, o mês sem DRE não pode entrar no divisor do ritmo.
+  const arrRB=D.dre26["Receita Bruta"]||[];
+  const comDreOrc=D.M26.filter((m,i)=>arrRB[i]!=null&&arrRB[i]!=="");
+  const M=comDreOrc.length?comDreOrc:D.M26;
+  avisarDreFaltante_("orc-aviso-dre", D.M26);
   const nMeses=M.length;
   const rows=D.orcamento.map(o=>{
     const r26=sumDre26(o.key,M)||0;
@@ -3966,10 +4050,9 @@ function renderOrcamento(){
   // ── Chart 1: comparativo anual das 4 linhas-chave ──
   const chave=["Receita Bruta","Lucro Bruto","Resultado Operacional","Lucro Líquido"].map(byLabel);
   mkChart("ch-orc-anual",{type:"bar",data:{labels:chave.map(r=>r.label),datasets:[
-    {label:"Realizado 2025",data:chave.map(r=>r.r25),backgroundColor:"rgba(143,214,171,.55)",borderRadius:4},
-    {label:"Meta 2026",data:chave.map(r=>r.meta26),backgroundColor:"rgba(227,181,105,.55)",borderColor:"#ba7517",borderWidth:1.5,borderRadius:4},
-    {label:"Realizado 2026 (anualizado)",data:chave.map(r=>r.anualizado),backgroundColor:"rgba(127,176,217,.8)",borderRadius:4}
-  ]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:22}},plugins:{legend:{position:"bottom",labels:{font:{size:11}}},barValue:{enabled:true,color:"#0a1a33",fontSize:10,fmt:v=>fmtRk(v)},tooltip:{callbacks:{label:c=>" "+c.dataset.label+": "+fmtRk(c.parsed.y)}}},scales:{y:{ticks:{callback:v=>fmtRk(v)},grid:{color:"rgba(10,26,51,.06)"}},x:{grid:{display:false}}}}});
+    {label:"Meta 2026",data:chave.map(r=>r.meta26),backgroundColor:"#ba7517",borderRadius:4},
+    {label:"Realizado 2026 (anualizado)",data:chave.map(r=>r.anualizado),backgroundColor:"#163834",borderRadius:4}
+  ]},options:{responsive:true,maintainAspectRatio:false,layout:{padding:{top:22}},plugins:{legend:{position:"bottom",labels:{font:{size:11}}},barValue:{enabled:true,neg:true,color:"#0a1a33",fontSize:11,fmt:v=>fmtRk(v)},tooltip:{callbacks:{label:c=>" "+c.dataset.label+": "+fmtRk(c.parsed.y)}}},scales:{y:{ticks:{callback:v=>fmtRk(v)},grid:{color:"rgba(10,26,51,.06)"}},x:{grid:{display:false}}}}});
 
   // ── Chart 2: atingimento (% do ritmo esperado) por linha, cor conforme tipo ──
   const ativas=rows.filter(r=>r.ating!=null);
@@ -4000,13 +4083,13 @@ function renderOrcamento(){
     (txCusto?ic(piorCusto.ating>120?"risk":"info","Maior desvio de custo",txCusto):"");
 
   // ── Tabela completa ──
-  let th="<table><thead><tr><th>Linha</th><th class='r'>Meta 2026</th><th class='r'>% Receita</th><th class='r'>Realizado YTD</th><th class='r'>Ating. Ritmo</th><th class='r'>Ating. Meta Anual</th><th class='r'>Realizado 2025</th><th class='r'>Anualizado 2026</th></tr></thead><tbody>";
+  let th="<table><thead><tr><th>Linha</th><th class='r'>Meta 2026</th><th class='r'>% Receita</th><th class='r'>Realizado YTD</th><th class='r'>Ating. Ritmo</th><th class='r'>Ating. Meta Anual</th><th class='r'>Anualizado 2026</th></tr></thead><tbody>";
   const boldRows=new Set(["Receita Bruta","Receita Líquida","Lucro Bruto","Resultado Operacional","LAIR","Lucro Líquido"]);
   rows.forEach(r=>{
     const bom = r.ating==null?null:(r.isCusto? r.ating<=105 : r.ating>=95);
     const cls = bom==null?"":(bom?"hl":( (r.isCusto? r.ating>120:r.ating<80) ?"warn-row":""));
     const rowStyle=boldRows.has(r.label)?" style='font-weight:700'":"";
-    th+=`<tr class="${cls}"${rowStyle}><td>${r.label}</td><td class='r'>${fmtRk(r.meta26)}</td><td class='r'>${fmtP(r.pmeta26)}</td><td class='r'>${fmtRk(r.r26)}</td><td class='r'>${r.ating!=null?fmtP(r.ating):'-'}</td><td class='r'>${r.atingAnual!=null?fmtP(r.atingAnual):'-'}</td><td class='r'>${fmtRk(r.r25)}</td><td class='r'>${r.anualizado!=null?fmtRk(r.anualizado):'-'}</td></tr>`;
+    th+=`<tr class="${cls}"${rowStyle}><td>${r.label}</td><td class='r'>${fmtRk(r.meta26)}</td><td class='r'>${fmtP(r.pmeta26)}</td><td class='r'>${fmtRk(r.r26)}</td><td class='r'>${r.ating!=null?fmtP(r.ating):'-'}</td><td class='r'>${r.atingAnual!=null?fmtP(r.atingAnual):'-'}</td><td class='r'>${r.anualizado!=null?fmtRk(r.anualizado):'-'}</td></tr>`;
   });
   document.getElementById("orc-tw").innerHTML=th+"</tbody></table>";
 }
@@ -4021,6 +4104,28 @@ function renderCharts(tid){
 }
 
 /** Rótulo do período usado pelas seções de detalhe (ex.: "Jul/26" ou "Jan/26 a Jul/26"). */
+/* Aviso nas abas que usam as seções de detalhe quando o período escolhido
+   inclui meses sem detalhe (as abas de detalhe começam em Jun/26). */
+function avisoDetalhe_(tid){
+  const alvo={fat:'tab-fat',tut:'tab-tut',mix:'tab-mix',rank:'tab-rank'}[tid];
+  if(!alvo||!D||!D.detalheCobertura) return;
+  const sec=document.querySelector('#'+alvo+' .sec'); if(!sec) return;
+  let el=document.getElementById('aviso-det-'+tid);
+  if(!el){
+    el=document.createElement('div'); el.className='note'; el.id='aviso-det-'+tid;
+    const sub=sec.querySelector('.sec-sub');
+    if(sub&&sub.nextSibling) sec.insertBefore(el,sub.nextSibling); else sec.appendChild(el);
+  }
+  const C=D.detalheCobertura, fx=a=>a.length>1?a[0]+' a '+a[a.length-1]:a[0];
+  if(!C.semDetalhe.length){ el.style.display='none'; el.innerHTML=''; return; }
+  const disp=C.todos.length?fx(C.todos):'';
+  const onde={fat:'Dia da semana e turnos',tut:'Segmentação, perfil e formas de pagamento',mix:'Receita por grupo e Top 30',rank:'Tutores e bairros'}[tid];
+  el.innerHTML = C.comDetalhe.length
+    ? `\u2139 ${onde} cobrem só <strong>${fx(C.comDetalhe)}</strong>: não há detalhe para ${fx(C.semDetalhe)}. Os indicadores mensais continuam cobrindo o período inteiro.`
+    : `\u2139 ${onde} não têm dado para o período escolhido. O detalhe existe ${disp?'para <strong>'+disp+'</strong>':'só a partir de Jun/26'}; os indicadores mensais continuam normais.`;
+  el.style.display='';
+}
+
 function rotuloDetalhe_(){
   const M = (D && D.detalheMeses && D.detalheMeses.length) ? D.detalheMeses : (D ? D.M26 : []);
   if(!M || !M.length) return "";
@@ -4032,6 +4137,7 @@ function renderTab(tid){
   setChartTheme(tid);
   // Reconstrói as seções de detalhe conforme o período selecionado, antes de desenhar
   aplicarDetalhePorPeriodo_(st(tid).months);
+  avisoDetalhe_(tid);
   if(tid==="resumo") renderResumo(tid);
   else if(tid==="dfc") renderDFC(tid);
   else if(tid==="fin") renderFinCharts(tid);
