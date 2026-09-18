@@ -387,7 +387,14 @@ table.dre-cats .row-sub td.cat-td{padding-left:28px;font-size:11px;font-weight:4
 table.dre-cats .row-sub2 td{background:#FAFCFB!important;color:var(--muted)}
 table.dre-cats .row-sub2 td.cat-td{padding-left:44px;font-size:10.5px;font-weight:400;background:#FAFCFB!important;color:var(--muted)}
 /* Colapso CSS */
-table.dre-cats tr.hide-collapsed{display:none}
+table.dre-cats tr.hide-collapsed{display:none!important}
+/* categorias intermediárias (Administrativas, Pessoal, Marketing, Financeiras) */
+table.dre-cats .row-cat td{font-weight:700;background:#eaf4ee!important;color:var(--navy);font-size:11.5px}
+table.dre-cats .row-cat td.cat-td{background:#dcefe3!important;padding-left:20px;font-weight:700;color:var(--navy);font-size:11.5px}
+/* contas sem lançamento nos últimos meses: ocultas por padrão */
+table.dre-cats tr.row-zero3{display:none}
+body.dfc-show-zero table.dre-cats tr.row-zero3{display:table-row}
+body.dfc-show-zero table.dre-cats tr.row-zero3 td{opacity:.5;font-style:italic}
 table.dre-cats tr.row-clickable td.cat-td{cursor:pointer;user-select:none}
 table.dre-cats tr.row-clickable td.cat-td::before{content:'▾';display:inline-block;margin-right:7px;font-size:9px;color:var(--ok);transition:transform .15s ease}
 table.dre-cats tr.row-clickable.collapsed td.cat-td::before{transform:rotate(-90deg)}
@@ -932,6 +939,8 @@ table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
       <span style="width:1px;background:var(--line);height:18px;display:inline-block;margin:0 6px"></span>
       <button class="dfc-view-btn active" id="dfc-ah-prev" onclick="setDfcAh('prev')" title="Variação vs mês anterior">AH% Mês Ant.</button>
       <button class="dfc-view-btn" id="dfc-ah-y25" onclick="setDfcAh('y25')" title="Variação vs mesmo mês de 2025">AH% vs 2025</button>
+      <span style="width:1px;background:var(--line);height:18px;display:inline-block;margin:0 6px"></span>
+      <button class="dfc-view-btn" id="dfc-zero-btn" onclick="dfcToggleZero()" title="Contas sem nenhum lançamento nos últimos 3 meses fechados" style="display:none">Contas sem lançamento</button>
     </div>
     <div id="dfc-wrap"></div>
   </div>
@@ -2096,7 +2105,6 @@ function renderDFC(tid){
     {l:"Devoluções", k:"Devoluções", tipo:"sub", memberOf:["rb"]},
     {l:"(−) IMPOSTOS E DEDUÇÕES", k:"Impostos e Deduções", tipo:"group", togglesGroup:"imp", sintetico:true},
     {l:"Taxa operadora cartão", k:"Taxa operadora cartão", tipo:"sub", memberOf:["imp"]},
-    {l:"Impostos", k:"Impostos", tipo:"sub", memberOf:["imp"]},
     {l:"Taxas e contribuições", k:"Taxas e contribuições", tipo:"sub", memberOf:["imp"]},
     {l:"COFINS", k:"COFINS", tipo:"sub", memberOf:["imp"]},
     {l:"ICMS", k:"ICMS", tipo:"sub", memberOf:["imp"]},
@@ -2154,7 +2162,7 @@ function renderDFC(tid){
     {l:"↳ Taxas e tarifas bancárias", k:"Taxas e tarifas bancárias", tipo:"sub2", memberOf:["do","fin"]},
     {l:"(=) RESULTADO OPERACIONAL", k:"Resultado Operacional", tipo:"result", sintetico:true},
     {l:"Integralização de Capital", k:"Integralização de Capital", tipo:"sub"},
-    {l:"(−) INVEST. E PROVISÕES", k:"Investimentos e Provisões", tipo:"group", togglesGroup:"ip", sintetico:true, memberOf:["do"]},
+    {l:"(−) INVEST. E PROVISÕES", k:"Investimentos e Provisões", tipo:"group", togglesGroup:"ip", sintetico:true},
     {l:"Aplicações e Provisões", k:"Aplicações e Provisões", tipo:"sub", memberOf:["ip"]},
     {l:"Empréstimos e Financiamentos", k:"Empréstimos e Financiamentos", tipo:"sub", memberOf:["ip"]},
     {l:"Investimentos em Equipamento", k:"Investimentos em Equipamento", tipo:"sub", memberOf:["ip"]},
@@ -2168,6 +2176,12 @@ function renderDFC(tid){
 
   /* Sempre renderizar todas as linhas; Sintético/Analítico controla via CSS */
   const activeRows = STRUCT;
+
+  /* Últimos 3 meses com DRE lançada: base para esconder contas sem movimento */
+  const rbArr = D.dre26["Receita Bruta"]||[];
+  const idxComDre = ms.map((_,i)=>i).filter(i=>rbArr[i]!=null&&rbArr[i]!=="");
+  const ult3 = idxComDre.slice(-3);
+  let nZeradas = 0;
 
   /* Linhas de custo: AH% invertido (queda = bom) */
   const COST = new Set(["Custo de Venda","Adiantamento de clientes","Impostos e Deduções",
@@ -2236,7 +2250,13 @@ function renderDFC(tid){
     const media     = ms.length?tot/ms.length:0;
 
     /* Classes da linha */
-    let rowCls = isResult?"row-result":isGroup?"row-group":isSub2?"row-sub2":"row-sub";
+    const isCat = !!(r.togglesGroup && r.tipo==='sub');   // Administrativas, Pessoal, Marketing, Financeiras
+    let rowCls = isResult?"row-result":isGroup?"row-group":isCat?"row-cat":isSub2?"row-sub2":"row-sub";
+    /* Conta de detalhe sem nenhum lançamento nos últimos 3 meses fechados */
+    if(!isResult && !isGroup && !isCat && ult3.length){
+      const semMov = ult3.every(i=>{const v=vals[i]; return v==null||v===0;});
+      if(semMov){ rowCls += " row-zero3"; nZeradas++; }
+    }
     rowCls += " dfc-drill";
     let trAttrs = ` data-key="${r.k.replace(/"/g,'&quot;')}" data-label="${r.l.replace(/"/g,'&quot;')}" data-cost="${isCost}"`;
     /* Linha colapsável (controla um grupo) */
@@ -2254,7 +2274,11 @@ function renderDFC(tid){
     }
 
     h += `<tr class="${rowCls}"${trAttrs}>`;
-    h += `<td class='cat-td'>${r.l}</td>`;
+    /* Seta em toda subcategoria (filha de um grupo), qualquer que seja o nível */
+    const temPai = !!(r.memberOf && r.memberOf.length);
+    const rotulo = String(r.l).replace(/^↳\s*/,'');
+    const seta = (temPai && !isResult && !isGroup && !isCat) ? '↳ ' : '';
+    h += `<td class='cat-td'>${seta}${rotulo}</td>`;
 
     /* Colunas mensais */
     vals.forEach((v,idx)=>{
@@ -2276,11 +2300,41 @@ function renderDFC(tid){
   });
 
   h += "</tbody></table>";
+  /* ── Card: Total Gasto com Pessoal (Pessoal + comissões de veterinários) ── */
+  {
+    const soma = k => idxComDre.reduce((a,i)=>a+((D.dre26[k]||[])[i]||0),0);
+    const pes  = soma("Pessoal");
+    const vet  = soma("Veterinários Terceirizados");
+    const rot  = soma("Veterinários Terceirizados Rotina e Plantão");
+    const tot  = pes+vet+rot;
+    const rbTot= idxComDre.reduce((a,i)=>a+(rbArr[i]||0),0);
+    const nM   = idxComDre.length;
+    const pp   = v => tot? (v/tot*100).toFixed(1)+"%" : "-";
+    const per  = nM ? (nM===1?ms[idxComDre[0]]:ms[idxComDre[0]]+"–"+ms[idxComDre[nM-1]]) : "";
+    if(tot){
+      h += `<div class='topic' style='margin-top:26px'>Total Gasto com Pessoal · ${per}</div>
+      <div class='krow'>
+        <div class='kpi'><div class='kl'>Total Gasto com Pessoal</div><div class='kv'>${fmtV(tot)}</div><div class='ks'>${rbTot?(tot/rbTot*100).toFixed(1)+"% da Receita Bruta":""} · ${fmtV(tot/nM)}/mês</div></div>
+        <div class='kpi'><div class='kl'>Pessoal (CLT e encargos)</div><div class='kv'>${fmtV(pes)}</div><div class='ks'>${pp(pes)} do total${rbTot?" · "+(pes/rbTot*100).toFixed(1)+"% da RB":""}</div></div>
+        <div class='kpi'><div class='kl'>Comissões de Veterinários</div><div class='kv'>${fmtV(vet)}</div><div class='ks'>${pp(vet)} do total${rbTot?" · "+(vet/rbTot*100).toFixed(1)+"% da RB":""}</div></div>
+        <div class='kpi'><div class='kl'>Rotina e Plantão</div><div class='kv'>${fmtV(rot)}</div><div class='ks'>${pp(rot)} do total${rbTot?" · "+(rot/rbTot*100).toFixed(1)+"% da RB":""}</div></div>
+      </div>
+      <div class='dfc-note' style='margin-bottom:14px'>Linha calculada: soma de <strong>Pessoal</strong> (despesa operacional) com as <strong>comissões de veterinários</strong> (custo de venda). Não existe como conta no DRE, por isso aparece aqui e não na tabela acima.</div>`;
+    }
+  }
+
   h += `<div class='dfc-note'><strong>Convenções:</strong> (+) entradas · (−) saídas · (=) totalizadores.
     AV% = peso sobre Receita Bruta. AH% = variação vs mês anterior (fica vazio quando não há mês anterior ou variação nula).
-    Clique em uma linha agregadora para expandir/recolher o detalhamento.</div>`;
+    Clique em uma linha agregadora para expandir/recolher o detalhamento.
+    Contas sem lançamento nos últimos 3 meses fechados ficam ocultas; use o botão "Contas sem lançamento" para exibi-las.</div>`;
 
   document.getElementById("dfc-wrap").innerHTML = h;
+  const zb = document.getElementById("dfc-zero-btn");
+  if(zb){
+    zb.style.display = nZeradas ? "" : "none";
+    zb.textContent = `Contas sem lançamento (${nZeradas})`;
+    zb.classList.toggle("active", document.body.classList.contains("dfc-show-zero"));
+  }
   bindDRE();
 }
 
@@ -2505,6 +2559,12 @@ function dfcSetView(v){
   }
   document.getElementById('dfc-view-ana')?.classList.toggle('active', expand);
   document.getElementById('dfc-view-sin')?.classList.toggle('active', !expand);
+}
+
+/* Mostrar/ocultar contas sem lançamento nos últimos 3 meses fechados */
+function dfcToggleZero(){
+  const on = document.body.classList.toggle('dfc-show-zero');
+  document.getElementById('dfc-zero-btn')?.classList.toggle('active', on);
 }
 
 function dfcGrp(k){}     // compat
