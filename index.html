@@ -1193,15 +1193,22 @@ table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
 <div class="tab-panel" id="tab-vet">
   <div class="sec">
     <div class="sec-title">Veterinários</div>
-    <div class="sec-sub">Comissões, custo de pessoal e eficiência · 2026 vs 2025</div>
+    <div class="sec-sub">Faturamento por profissional, comissões e custo de pessoal</div>
     <div class="krow" id="vet-kpis" style="display:grid;grid-template-columns:repeat(3,1fr)"></div>
-    <div class="topic" id="topic-vet-comissao">Comissão por Profissional</div>
-    <div class="cgrid">
-      <div class="cc full">
-        <div class="chart-header"><span class="chart-title">Ranking de comissão por veterinário (Top 12)</span></div>
-        <div style="position:relative;height:360px"><canvas id="ch-vetrank" style="position:absolute;inset:0;width:100%;height:100%"></canvas></div>
-        <div id="vetrank-table" style="margin-top:10px"></div>
+    <div class="topic" id="topic-vet-fat">Faturamento por Profissional</div>
+    <div class="note" id="vetfat-aviso" style="display:none"></div>
+    <div id="vetfat-corpo">
+      <div class="krow" id="vetfat-kpis" style="display:grid;grid-template-columns:repeat(3,1fr)"></div>
+      <div class="cgrid">
+        <div class="cc full">
+          <div class="chart-header"><span class="chart-title">Receita atribuída por profissional</span></div>
+          <div id="vetfat-chart-box" style="position:relative;height:420px"><canvas id="ch-vetfat" style="position:absolute;inset:0;width:100%;height:100%"></canvas></div>
+          <div id="vetfat-legenda" style="margin-top:10px"></div>
+        </div>
       </div>
+      <div class="tw" id="vetfat-tw"></div>
+      <div class="irow" id="vetfat-insights"></div>
+      <div class="note" id="vetfat-metodo"></div>
     </div>
   </div>
 </div>
@@ -3388,6 +3395,20 @@ function aplicarDetalhePorPeriodo_(meses){
     com:l['Comissão (R$)'], p:l['% do Total']})).sort((a,b)=>b.com-a.com);
   D.vetRankMes = M.length>1 ? (M[0]+" a "+M[M.length-1]) : M[0];
 
+  // ---- Faturamento por profissional (agenda × vendas) ----
+  // Usa só os meses que existem na aba Veterinários Faturamento. O % é sobre a soma
+  // de todas as linhas, inclusive "Não atribuído", que fecha com o faturamento bruto.
+  const vfTodos = [];
+  (F.vetFat||[]).forEach(l=>{ const m=String(l['Mês']); if(m && m!=='undefined' && vfTodos.indexOf(m)<0) vfTodos.push(m); });
+  const vfM = M.filter(m=>vfTodos.indexOf(m)>=0);
+  let vf = vfM.length ? agregarDetalhe_(F.vetFat, vfM, {chave:l=>l.Profissional,
+    rotulos:['Profissional','Categoria'], somar:['Agendamentos','Atendimentos Faturados','Receita (R$)']}) : [];
+  vf = recalcPct_(vf, 'Receita (R$)', '% do Faturamento');
+  D.vetFat = vf.map(l=>({n:l.Profissional, cat:l.Categoria, ag:l.Agendamentos,
+    af:l['Atendimentos Faturados'], r:l['Receita (R$)'], p:l['% do Faturamento'],
+    tk:l['Atendimentos Faturados'] ? l['Receita (R$)']/l['Atendimentos Faturados'] : null}));
+  D.vetFatCob = {meses: vfM, sem: M.filter(m=>vfTodos.indexOf(m)<0), todos: vfTodos};
+
   // ---- Dia da Semana e Turnos ----
   const bDT = F.diaTurnoBlocos;
   let dia = agregarDetalhe_(bDT['Dia da Semana'], M, {chave:l=>l.Categoria,
@@ -3608,7 +3629,7 @@ function renderVet(tid){
     `<div class="kpi"><div class="kl">Custo por Visita</div><div class="kv">${custoPorVisita?"R$ "+custoPorVisita.toFixed(0):"-"}</div><div class="ks">Total Pessoal ÷ ${vendas26} visitas</div></div>`
   ].join("");
 
-  renderVetRank();
+  renderVetFat();
 }
 
 /* Comissão % RB e composição de Pessoal, exibidos em Financeiro > Resultado */
@@ -4011,38 +4032,160 @@ function renderHeat(){
   el.innerHTML=html;
 }
 
-function renderVetRank(){
-  const rk=D.vetRank.slice(0,12);
-  {
-    const th=document.getElementById("topic-vet-comissao");
-    if(th) th.textContent = "Comissão por Profissional" + (D.vetRankMes ? " ("+D.vetRankMes+")" : "");
-  }
-  // Comissão vem do financeiro; se a DRE do mês não foi lançada, não há dado.
-  // Explica em vez de deixar um gráfico em branco.
-  if(!rk.length){
-    const cv=document.getElementById("ch-vetrank");
-    if(cv && cv.parentElement) cv.parentElement.innerHTML =
-      '<div style="color:var(--cap);font-size:12.5px;padding:16px 2px">Sem dados de comissão para ' +
-      (D.vetRankMes||"o período selecionado") +
-      '. Esse indicador depende do lançamento financeiro do mês.</div>';
-    const tv=document.getElementById("vetrank-table");
-    if(tv) tv.innerHTML="";
+/* ── Faturamento por profissional (aba Veterinários Faturamento) ──
+   Receita atribuída a quem ATENDEU o paciente na agenda, não a quem lançou o item.
+   Tudo aqui é calculado a partir de D.vetFat: nenhum nome ou número escrito à mão. */
+const VF_COR = {
+  'Clínica':      'rgba(47,143,110,.85)',
+  'Equipe':       'rgba(127,176,217,.85)',
+  'Plantão':      'rgba(143,214,171,.85)',
+  'Especialista': 'rgba(214,166,92,.85)',
+  'Não atribuído':'rgba(213,229,216,.22)'
+};
+const VF_ORDEM = ['Clínica','Equipe','Plantão','Especialista'];
+
+function vfEsc_(t){ return String(t==null?'':t).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function vfReais_(v){ return v==null ? '-' : 'R$ ' + Math.round(v).toLocaleString('pt-BR'); }
+
+function renderVetFat(){
+  const aviso = document.getElementById('vetfat-aviso');
+  const corpo = document.getElementById('vetfat-corpo');
+  const th    = document.getElementById('topic-vet-fat');
+  if(!aviso || !corpo) return;
+
+  const C  = D.vetFatCob || {meses:[], sem:[], todos:[]};
+  const fx = a => a.length>1 ? a[0]+' a '+a[a.length-1] : a[0];
+  if(th) th.textContent = 'Faturamento por Profissional' + (C.meses.length ? ' ('+fx(C.meses)+')' : '');
+
+  // Sem nenhum mês com agenda no período: explica em vez de mostrar gráfico vazio.
+  if(!C.meses.length || !(D.vetFat||[]).length){
+    corpo.style.display = 'none';
+    aviso.innerHTML = C.todos.length
+      ? '\u2139 O faturamento por profissional existe a partir de <strong>'+C.todos[0]+'</strong>, primeiro mês com a agenda importada. O período escolhido não inclui nenhum mês com esse dado.'
+      : '\u2139 Ainda não há faturamento por profissional na planilha. Ele aparece depois que a aba <strong>Veterinários Faturamento</strong> for importada.';
+    aviso.style.display = '';
     return;
   }
-  mkChart("ch-vetrank",{type:"bar",data:{labels:rk.map(x=>x.n.length>28?x.n.slice(0,26)+"…":x.n),datasets:[
-    {label:"Comissão",data:rk.map(x=>x.com),backgroundColor:rk.map(x=>x.cat==="T"?"rgba(127,176,217,.85)":"rgba(47,143,110,.82)"),borderRadius:3}
-  ]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,
-    plugins:{legend:{display:false},barValue:{enabled:true,horizontal:true,color:LEGCOL,fontSize:11,fmt:v=>fmtRk(v)},tooltip:{callbacks:{label:c=>{const v=D.vetRank[c.dataIndex];return fmtRk(v.com)+" · "+(v.cat==="T"?"Terceirizado":"Rotina/Plantão")+" · "+v.p+"% do total";}}}},
-    scales:{x:{max:Math.max(...rk.map(x=>x.com))*1.25,ticks:{callback:v=>fmtRk(v)},grid:{color:"rgba(213,229,216,.09)"}},y:{grid:{display:false},ticks:{font:{size:10}}}}}});
-  const tbl=document.getElementById("vetrank-table");
-  if(tbl){
-    const T=D.vetRank.filter(x=>x.cat==="T"), R=D.vetRank.filter(x=>x.cat==="R");
-    const totT=T.reduce((a,x)=>a+x.com,0), totR=R.reduce((a,x)=>a+x.com,0);
-    tbl.innerHTML=`<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--cap)">`+
-      `<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#7fb0d9;margin-right:5px"></span>Terceirizados ${fmtRk(totT)} · ${T.length} profs</span>`+
-      `<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#2f8f6e;margin-right:5px"></span>Rotina &amp; Plantão ${fmtRk(totR)} · ${R.length} profs</span>`+
-      `<span style="font-weight:600">Total ${fmtRk(totT+totR)} · ${D.vetRank.length} profissionais</span></div>`;
+  corpo.style.display = '';
+  if(C.sem.length){
+    aviso.innerHTML = '\u2139 Faturamento por profissional cobre só <strong>'+fx(C.meses)+'</strong>: não há agenda importada para '+fx(C.sem)+'. Os cartões de comissão e pessoal acima cobrem o período inteiro.';
+    aviso.style.display = '';
+  } else {
+    aviso.style.display = 'none'; aviso.innerHTML = '';
   }
+
+  const L    = D.vetFat;
+  const ordC = c => { const i = VF_ORDEM.indexOf(c); return i<0 ? 9 : i; };
+  const prof = L.filter(x=>x.cat!=='Não atribuído').sort((a,b)=>b.r-a.r);
+  const naL  = L.filter(x=>x.cat==='Não atribuído').sort((a,b)=>b.r-a.r);
+  const tot  = L.reduce((a,x)=>a+(x.r||0),0);
+  const atr  = prof.reduce((a,x)=>a+(x.r||0),0);
+  const naT  = tot - atr;
+  const agT  = prof.reduce((a,x)=>a+(x.ag||0),0);
+  const afT  = prof.reduce((a,x)=>a+(x.af||0),0);
+  const tkM  = afT ? atr/afT : null;
+  const pct  = v => tot ? v/tot*100 : 0;
+
+  /* KPIs */
+  document.getElementById('vetfat-kpis').innerHTML = [
+    `<div class="kpi"><div class="kl">Receita atribuída pela agenda</div><div class="kv">${fmtRk(atr)}</div><div class="ks">${fmtP(pct(atr))} do faturamento de ${fmtRk(tot)}</div></div>`,
+    `<div class="kpi"><div class="kl">Atendimentos faturados</div><div class="kv">${fmtN(afT)}</div><div class="ks">${agT?'de '+fmtN(agT)+' agendamentos ('+fmtP(afT/agT*100)+')':'sem agendamentos no período'}</div></div>`,
+    `<div class="kpi"><div class="kl">Ticket por atendimento</div><div class="kv">${tkM?vfReais_(tkM):'-'}</div><div class="ks">Receita atribuída ÷ atendimentos faturados</div></div>`
+  ].join('');
+
+  /* Gráfico: profissionais (especialistas pequenos agrupados) + barra de não atribuído */
+  const LIM = 12;
+  const fixos = prof.filter(x=>x.cat!=='Especialista');
+  const esp   = prof.filter(x=>x.cat==='Especialista');
+  const vagas = Math.max(0, LIM - fixos.length);
+  let barras  = fixos.concat(esp.slice(0, vagas));
+  const resto = esp.slice(vagas);
+  if(resto.length){
+    barras.push({n:'Outros especialistas ('+resto.length+')', cat:'Especialista',
+      r:resto.reduce((a,x)=>a+x.r,0), af:resto.reduce((a,x)=>a+(x.af||0),0), agrupado:true});
+  }
+  barras.sort((a,b)=>b.r-a.r);
+  if(naT>0) barras.push({n:'Não atribuído (sem agendamento)', cat:'Não atribuído', r:naT, af:null});
+
+  const box = document.getElementById('vetfat-chart-box');
+  if(box) box.style.height = Math.max(240, barras.length*30+40) + 'px';
+  const corta = t => t.length>30 ? t.slice(0,28)+'…' : t;
+  mkChart('ch-vetfat', {type:'bar',
+    data:{labels:barras.map(x=>corta(x.n)), datasets:[{label:'Receita atribuída', data:barras.map(x=>x.r),
+      backgroundColor:barras.map(x=>VF_COR[x.cat]||VF_COR['Especialista']), borderRadius:3}]},
+    options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false},
+        barValue:{enabled:true, horizontal:true, color:LEGCOL, fontSize:11, fmt:v=>fmtRk(v)},
+        tooltip:{callbacks:{label:c=>{
+          const x = barras[c.dataIndex];
+          const partes = [vfReais_(x.r), fmtP(pct(x.r))+' do faturamento'];
+          if(x.af) partes.push(fmtN(x.af)+' atendimentos', 'ticket '+vfReais_(x.r/x.af));
+          return partes.join(' · ');
+        }}}},
+      scales:{x:{max:Math.max(...barras.map(x=>x.r))*1.22, ticks:{callback:v=>fmtRk(v)}, grid:{color:'rgba(213,229,216,.09)'}},
+              y:{grid:{display:false}, ticks:{font:{size:11}}}}}});
+
+  /* Legenda por categoria */
+  const porCat = {};
+  prof.forEach(x=>{ porCat[x.cat] = porCat[x.cat] || {r:0,n:0}; porCat[x.cat].r += x.r; porCat[x.cat].n++; });
+  const chip = (cor, txt) => `<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${cor};margin-right:5px"></span>${txt}</span>`;
+  document.getElementById('vetfat-legenda').innerHTML =
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--cap)">' +
+    Object.keys(porCat).sort((a,b)=>ordC(a)-ordC(b)).map(c=>chip(VF_COR[c]||VF_COR['Especialista'], `${c} ${fmtRk(porCat[c].r)} · ${porCat[c].n} ${porCat[c].n>1?'profissionais':'profissional'}`)).join('') +
+    (naT>0 ? chip(VF_COR['Não atribuído'], `Não atribuído ${fmtRk(naT)}`) : '') +
+    '</div>';
+
+  /* Tabela completa */
+  const linha = (x, estilo) => `<tr${estilo?` style="${estilo}"`:''}><td>${vfEsc_(x.n)}</td><td>${vfEsc_(x.cat)}</td>` +
+    `<td class="r">${x.ag?fmtN(x.ag):'-'}</td><td class="r">${x.af?fmtN(x.af):'-'}</td>` +
+    `<td class="r">${vfReais_(x.r)}</td><td class="r">${fmtP(pct(x.r))}</td>` +
+    `<td class="r">${x.af?vfReais_(x.r/x.af):'-'}</td></tr>`;
+  const profTab = prof.slice().sort((a,b)=>ordC(a.cat)-ordC(b.cat) || b.r-a.r);
+  let h = '<table><thead><tr><th>Profissional</th><th>Categoria</th><th class="r">Agend.</th><th class="r">Atend. faturados</th>' +
+          '<th class="r">Receita</th><th class="r">% do fat.</th><th class="r">Ticket/atend.</th></tr></thead><tbody>';
+  h += profTab.map(x=>linha(x)).join('');
+  h += linha({n:'Atribuído pela agenda', cat:'', ag:agT, af:afT, r:atr}, 'font-weight:700;border-top:1px solid rgba(213,229,216,.25)');
+  h += naL.map(x=>linha(x, 'opacity:.62')).join('');
+  h += linha({n:'Total do faturamento', cat:'', ag:null, af:null, r:tot}, 'font-weight:700;border-top:1px solid rgba(213,229,216,.25)');
+  h += '</tbody></table>';
+  document.getElementById('vetfat-tw').innerHTML = h;
+
+  /* Leituras calculadas */
+  const cards = [];
+  const clin = prof.filter(x=>x.cat==='Clínica');
+  const top3 = prof.slice(0,3);
+  if(top3.length===3 && atr){
+    const s3 = top3.reduce((a,x)=>a+x.r,0);
+    cards.push(ic('info','Concentração',
+      `${top3.map(x=>vfEsc_(x.n.split(' ')[0])).join(', ')} somam <strong>${fmtP(s3/atr*100)}</strong> da receita atribuída pela agenda (${fmtRk(s3)} de ${fmtRk(atr)}).`));
+  }
+  const clinTk = clin.filter(x=>(x.af||0)>=10);
+  if(clinTk.length>=2){
+    const mx = clinTk.slice().sort((a,b)=>b.r/b.af-a.r/a.af)[0];
+    const tkClin = clinTk.reduce((a,x)=>a+x.r,0)/clinTk.reduce((a,x)=>a+x.af,0);
+    cards.push(ic('good','Maior ticket na clínica',
+      `${vfEsc_(mx.n)} tem ticket de <strong>${vfReais_(mx.r/mx.af)}</strong> por atendimento, contra ${vfReais_(tkClin)} na média das veterinárias da clínica.`));
+  }
+  const conv = clin.filter(x=>(x.ag||0)>=10).map(x=>({x, t:x.af/x.ag})).sort((a,b)=>a.t-b.t);
+  if(conv.length){
+    const m = conv[0], tp = m.t*100;
+    cards.push(ic(tp<75?'warn':'info','Agenda sem venda',
+      `${vfEsc_(m.x.n)} teve ${fmtN(m.x.af)} de ${fmtN(m.x.ag)} agendamentos com venda (${fmtP(tp)}), a menor taxa da clínica. Agendamento sem venda pode ser retorno sem cobrança, falta ou venda feita em outro cadastro.`));
+  }
+  if(tot && naL.length){
+    const pNa = pct(naT), g = naL[0];
+    const nomeG = String(g.n).replace(/^Não atribuído\s*·\s*/,'');
+    cards.push(ic(pNa>35?'risk':pNa>20?'warn':'info','Fora da agenda',
+      `<strong>${fmtP(pNa)}</strong> do faturamento (${fmtRk(naT)}) não tem agendamento correspondente. O maior grupo é ${vfEsc_(nomeG)}, com ${fmtRk(g.r)}: plantão, internação e farmácia avulsa entram aqui.`));
+  }
+  const ins = document.getElementById('vetfat-insights');
+  ins.style.gridTemplateColumns = cards.length===4 ? 'repeat(2,1fr)' : '';
+  ins.innerHTML = cards.join('');
+
+  document.getElementById('vetfat-metodo').innerHTML =
+    '\u2139 <strong>Como é calculado:</strong> cada item vendido vai para quem atendeu o paciente na agenda (mesmo dia ou dia seguinte, cruzando pelo telefone do tutor), e não para quem lançou o item no sistema. ' +
+    'Equipe Imagem e Bloco Cirúrgico são agendas de equipe. Quando o paciente passa por mais de um profissional no dia, imagem vai para a Equipe Imagem, cirurgia e anestesia para o Bloco, e o restante para quem fez a consulta. ' +
+    'Ticket = receita atribuída ÷ atendimentos faturados.';
 }
 
 
@@ -4395,6 +4538,7 @@ function remapDados_(resp){
     pag:            dados.formasDePagamento.linhas||[],
     heat:           dados.heatmapDiaXTurno.linhas||[],
     vetRank:        dados.veterinariosComissao.linhas||[],
+    vetFat:         ((dados.veterinariosFaturamento||{}).linhas)||[],
     perfilBlocos:   dados.perfilDosTutores.blocos||{},
     diaTurnoBlocos: dados.diaDaSemanaETurnos.blocos||{}
   };
