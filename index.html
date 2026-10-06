@@ -843,6 +843,13 @@ table.dre-cats tr.dfc-drill:hover td:not(.cat-td){background:rgba(186,117,23,.06
 table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
 
 
+
+/* Faturamento por profissional: blocos Veterinárias / Equipes */
+.vf-bloco{font-size:13px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;margin:30px 0 4px;color:var(--ink)}
+.vf-bloco-sub{font-size:12px;color:var(--cap);margin:0 0 14px;line-height:1.5}
+body.theme-dark .vf-bloco,body.theme-green .vf-bloco{color:#e4f0e8}
+body.theme-dark .vf-bloco-sub,body.theme-green .vf-bloco-sub{color:rgba(213,229,216,.62)}
+.vf-sec td{font-weight:800;font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding-top:14px!important;opacity:.75}
 </style>
 </head>
 <body>
@@ -1198,16 +1205,27 @@ table.dre-cats tr.dfc-drill:hover td.cat-td{filter:brightness(.96)}
     <div class="topic" id="topic-vet-fat">Faturamento por Profissional</div>
     <div class="note" id="vetfat-aviso" style="display:none"></div>
     <div id="vetfat-corpo">
-      <div class="krow" id="vetfat-kpis" style="display:grid;grid-template-columns:repeat(3,1fr)"></div>
+      <div class="krow" id="vetfat-kpis" style="display:grid;grid-template-columns:repeat(4,1fr)"></div>
+
+      <div class="vf-bloco">Veterinárias da clínica</div>
+      <div class="vf-bloco-sub" id="vf-sub-vet"></div>
       <div class="cgrid">
-        <div class="cc full">
-          <div class="chart-header"><span class="chart-title">Receita atribuída por profissional</span></div>
-          <div id="vetfat-chart-box" style="position:relative;height:420px"><canvas id="ch-vetfat" style="position:absolute;inset:0;width:100%;height:100%"></canvas></div>
-          <div id="vetfat-legenda" style="margin-top:10px"></div>
+        <div class="cc">
+          <div class="chart-header"><span class="chart-title">Receita por veterinária</span></div>
+          <div id="vetfat-chart-box" style="position:relative;height:280px"><canvas id="ch-vetfat"></canvas></div>
+        </div>
+        <div class="cc">
+          <div class="chart-header"><span class="chart-title">Ticket por atendimento × ticket por tutor</span></div>
+          <div style="position:relative;height:280px"><canvas id="ch-vetfat-tk"></canvas></div>
         </div>
       </div>
       <div class="tw" id="vetfat-tw"></div>
       <div class="irow" id="vetfat-insights"></div>
+
+      <div class="vf-bloco">Equipes e especialistas</div>
+      <div class="vf-bloco-sub">Equipe Imagem e Bloco Cirúrgico são agendas de equipe: o atendimento é exame ou cirurgia, não consulta, por isso ficam fora da comparação com as veterinárias. Especialistas atendem por encaminhamento.</div>
+      <div class="tw" id="vetfat-tw-eq"></div>
+      <div class="irow" id="vetfat-insights-eq"></div>
       <div class="note" id="vetfat-metodo"></div>
     </div>
   </div>
@@ -3402,11 +3420,20 @@ function aplicarDetalhePorPeriodo_(meses){
   (F.vetFat||[]).forEach(l=>{ const m=String(l['Mês']); if(m && m!=='undefined' && vfTodos.indexOf(m)<0) vfTodos.push(m); });
   const vfM = M.filter(m=>vfTodos.indexOf(m)>=0);
   let vf = vfM.length ? agregarDetalhe_(F.vetFat, vfM, {chave:l=>l.Profissional,
-    rotulos:['Profissional','Categoria'], somar:['Agendamentos','Atendimentos Faturados','Receita (R$)']}) : [];
+    rotulos:['Profissional','Categoria'], somar:['Agendamentos','Atendimentos Faturados','Tutores','Receita (R$)']}) : [];
+  // Linhas "Resumo" guardam os tutores ÚNICOS de cada bloco (não dá para somar as linhas:
+  // o mesmo tutor passa pela veterinária e pela Equipe Imagem). Saem da lista de profissionais.
+  const vfRes = {};
+  vf.filter(l=>l.Categoria==='Resumo').forEach(l=>{ vfRes[String(l.Profissional).replace(/^Tutores únicos\s*·\s*/,'')] = l.Tutores; });
+  vf = vf.filter(l=>l.Categoria!=='Resumo');
   vf = recalcPct_(vf, 'Receita (R$)', '% do Faturamento');
+  // Tutores só vale se TODOS os meses do período têm a coluna preenchida.
+  const vfTemTut = vfM.length>0 && vfM.every(m=>(F.vetFat||[]).some(l=>String(l['Mês'])===m && l.Categoria!=='Resumo' && l.Tutores!==null && l.Tutores!==undefined && l.Tutores!==''));
   D.vetFat = vf.map(l=>({n:l.Profissional, cat:l.Categoria, ag:l.Agendamentos,
     af:l['Atendimentos Faturados'], r:l['Receita (R$)'], p:l['% do Faturamento'],
+    tu:(vfTemTut && l.Categoria!=='Não atribuído') ? l.Tutores : null,
     tk:l['Atendimentos Faturados'] ? l['Receita (R$)']/l['Atendimentos Faturados'] : null}));
+  D.vetFatTut = vfTemTut ? vfRes : null;
   D.vetFatCob = {meses: vfM, sem: M.filter(m=>vfTodos.indexOf(m)<0), todos: vfTodos};
 
   // ---- Dia da Semana e Turnos ----
@@ -4075,117 +4102,161 @@ function renderVetFat(){
   }
 
   const L    = D.vetFat;
-  const ordC = c => { const i = VF_ORDEM.indexOf(c); return i<0 ? 9 : i; };
-  const prof = L.filter(x=>x.cat!=='Não atribuído').sort((a,b)=>b.r-a.r);
+  const R    = D.vetFatTut;                 // tutores únicos por bloco (null = sem dado)
+  const varios = C.meses.length>1;
+  const soma = (a,c) => a.reduce((s,x)=>s+(x[c]||0),0);
+  const prof = L.filter(x=>x.cat!=='Não atribuído');
+  const vets = prof.filter(x=>x.cat==='Clínica'||x.cat==='Plantão').sort((a,b)=>b.r-a.r);
+  const eqs  = prof.filter(x=>x.cat==='Equipe').sort((a,b)=>b.r-a.r);
+  const esps = prof.filter(x=>x.cat==='Especialista').sort((a,b)=>b.r-a.r);
   const naL  = L.filter(x=>x.cat==='Não atribuído').sort((a,b)=>b.r-a.r);
-  const tot  = L.reduce((a,x)=>a+(x.r||0),0);
-  const atr  = prof.reduce((a,x)=>a+(x.r||0),0);
-  const naT  = tot - atr;
-  const agT  = prof.reduce((a,x)=>a+(x.ag||0),0);
-  const afT  = prof.reduce((a,x)=>a+(x.af||0),0);
-  const tkM  = afT ? atr/afT : null;
+  const tot  = soma(L,'r'), atr = soma(prof,'r'), naT = tot-atr;
   const pct  = v => tot ? v/tot*100 : 0;
+  // Total de tutores de um bloco: o único (Resumo) quando existe; senão a soma das linhas.
+  const tutBloco = (nome, lista) => R ? (R[nome]!=null ? R[nome] : soma(lista,'tu')) : null;
+  const vR = soma(vets,'r'), vAf = soma(vets,'af'), vAg = soma(vets,'ag'), vTu = tutBloco('Veterinárias', vets);
+  const eR = soma(eqs,'r'),  eAf = soma(eqs,'af'),  eTu = tutBloco('Equipes', eqs);
+  const agT = soma(prof,'ag'), afT = soma(prof,'af');
+  const nome1 = (x, lista) => { const p = String(x.n).split(' ')[0];
+    return lista.filter(y=>String(y.n).split(' ')[0]===p).length>1 ? x.n : p; };
+  const real = v => v==null ? '-' : 'R$ ' + Math.round(v).toLocaleString('pt-BR');
+  const realK = v => v==null ? '-' : v>=1000 ? 'R$ '+(v/1000).toFixed(1).replace('.',',')+'k' : 'R$ '+Math.round(v);
+  const dec = v => v==null ? '-' : v.toFixed(2).replace('.',',');
+  const rotTut = varios ? 'soma dos meses' : 'tutores diferentes';
 
   /* KPIs */
   document.getElementById('vetfat-kpis').innerHTML = [
     `<div class="kpi"><div class="kl">Receita atribuída pela agenda</div><div class="kv">${fmtRk(atr)}</div><div class="ks">${fmtP(pct(atr))} do faturamento de ${fmtRk(tot)}</div></div>`,
     `<div class="kpi"><div class="kl">Atendimentos faturados</div><div class="kv">${fmtN(afT)}</div><div class="ks">${agT?'de '+fmtN(agT)+' agendamentos ('+fmtP(afT/agT*100)+')':'sem agendamentos no período'}</div></div>`,
-    `<div class="kpi"><div class="kl">Ticket por atendimento</div><div class="kv">${tkM?vfReais_(tkM):'-'}</div><div class="ks">Receita atribuída ÷ atendimentos faturados</div></div>`
+    `<div class="kpi"><div class="kl">Ticket por atendimento · veterinárias</div><div class="kv">${vAf?real(vR/vAf):'-'}</div><div class="ks">${fmtN(vAf)} atendimentos das ${vets.length} veterinárias</div></div>`,
+    `<div class="kpi"><div class="kl">Ticket por tutor · veterinárias</div><div class="kv">${vTu?real(vR/vTu):'-'}</div><div class="ks">${vTu?fmtN(vTu)+' tutores ('+rotTut+')':'tutores ainda não calculados para o período'}</div></div>`
   ].join('');
 
-  /* Gráfico: profissionais (especialistas pequenos agrupados) + barra de não atribuído */
-  const LIM = 12;
-  const fixos = prof.filter(x=>x.cat!=='Especialista');
-  const esp   = prof.filter(x=>x.cat==='Especialista');
-  const vagas = Math.max(0, LIM - fixos.length);
-  let barras  = fixos.concat(esp.slice(0, vagas));
-  const resto = esp.slice(vagas);
-  if(resto.length){
-    barras.push({n:'Outros especialistas ('+resto.length+')', cat:'Especialista',
-      r:resto.reduce((a,x)=>a+x.r,0), af:resto.reduce((a,x)=>a+(x.af||0),0), agrupado:true});
-  }
-  barras.sort((a,b)=>b.r-a.r);
-  if(naT>0) barras.push({n:'Não atribuído (sem agendamento)', cat:'Não atribuído', r:naT, af:null});
+  document.getElementById('vf-sub-vet').innerHTML =
+    'Comparativo entre as veterinárias que atendem consulta na agenda. <strong>Ticket por atendimento</strong> = receita ÷ atendimentos faturados. ' +
+    '<strong>Ticket por tutor</strong> = receita ÷ tutores diferentes: quando o mesmo tutor volta para retorno no mês, ele conta uma vez só.' +
+    (varios && R ? ' Com mais de um mês selecionado, os tutores são somados mês a mês (o mesmo tutor conta uma vez em cada mês).' : '');
 
-  const box = document.getElementById('vetfat-chart-box');
-  if(box) box.style.height = Math.max(240, barras.length*30+40) + 'px';
-  const corta = t => t.length>30 ? t.slice(0,28)+'…' : t;
+  /* Gráfico 1: receita por veterinária (rótulo do eixo traz os tutores) */
+  const rot = vets.map(x=>nome1(x,vets) + (x.tu!=null ? ' · '+fmtN(x.tu)+' tut.' : ''));
   mkChart('ch-vetfat', {type:'bar',
-    data:{labels:barras.map(x=>corta(x.n)), datasets:[{label:'Receita atribuída', data:barras.map(x=>x.r),
-      backgroundColor:barras.map(x=>VF_COR[x.cat]||VF_COR['Especialista']), borderRadius:3}]},
+    data:{labels:rot, datasets:[{label:'Receita', data:vets.map(x=>x.r), backgroundColor:VF_COR['Clínica'], borderRadius:3}]},
     options:{indexAxis:'y', responsive:true, maintainAspectRatio:false,
       plugins:{legend:{display:false},
-        barValue:{enabled:true, horizontal:true, color:LEGCOL, fontSize:11, fmt:v=>fmtRk(v)},
-        tooltip:{callbacks:{label:c=>{
-          const x = barras[c.dataIndex];
-          const partes = [vfReais_(x.r), fmtP(pct(x.r))+' do faturamento'];
-          if(x.af) partes.push(fmtN(x.af)+' atendimentos', 'ticket '+vfReais_(x.r/x.af));
-          return partes.join(' · ');
-        }}}},
-      scales:{x:{max:Math.max(...barras.map(x=>x.r))*1.22, ticks:{callback:v=>fmtRk(v)}, grid:{color:'rgba(213,229,216,.09)'}},
+        barValue:{enabled:true, horizontal:true, color:LEGCOL, fontSize:11, fmt:v=>realK(v)},
+        tooltip:{callbacks:{label:c=>{ const x = vets[c.dataIndex];
+          const p = [real(x.r), fmtP(pct(x.r))+' do faturamento'];
+          if(x.af) p.push(fmtN(x.af)+' atendimentos');
+          if(x.tu!=null) p.push(fmtN(x.tu)+' tutores');
+          return p.join(' · '); }}}},
+      scales:{x:{max:Math.max(1,...vets.map(x=>x.r))*1.25, ticks:{callback:v=>fmtRk(v)}, grid:{color:'rgba(213,229,216,.09)'}},
               y:{grid:{display:false}, ticks:{font:{size:11}}}}}});
 
-  /* Legenda por categoria */
-  const porCat = {};
-  prof.forEach(x=>{ porCat[x.cat] = porCat[x.cat] || {r:0,n:0}; porCat[x.cat].r += x.r; porCat[x.cat].n++; });
-  const chip = (cor, txt) => `<span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${cor};margin-right:5px"></span>${txt}</span>`;
-  document.getElementById('vetfat-legenda').innerHTML =
-    '<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--cap)">' +
-    Object.keys(porCat).sort((a,b)=>ordC(a)-ordC(b)).map(c=>chip(VF_COR[c]||VF_COR['Especialista'], `${c} ${fmtRk(porCat[c].r)} · ${porCat[c].n} ${porCat[c].n>1?'profissionais':'profissional'}`)).join('') +
-    (naT>0 ? chip(VF_COR['Não atribuído'], `Não atribuído ${fmtRk(naT)}`) : '') +
-    '</div>';
+  /* Gráfico 2: os dois tickets lado a lado */
+  const dsTk = [{label:'Ticket por atendimento', data:vets.map(x=>x.af?x.r/x.af:null), backgroundColor:'rgba(127,176,217,.80)', borderRadius:3}];
+  if(R) dsTk.push({label:'Ticket por tutor', data:vets.map(x=>x.tu?x.r/x.tu:null), backgroundColor:'rgba(47,143,110,.90)', borderRadius:3});
+  const tkMax = Math.max(1, ...dsTk.flatMap(d=>d.data.filter(v=>v!=null)));
+  mkChart('ch-vetfat-tk', {type:'bar',
+    data:{labels:vets.map(x=>nome1(x,vets)), datasets:dsTk},
+    options:{responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:true, position:'bottom', labels:{boxWidth:10, boxHeight:10}},
+        barValue:{enabled:true, color:LEGCOL, fontSize:10, fmt:v=>real(v).replace('R$ ','')},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+real(c.raw)}}},
+      scales:{y:{beginAtZero:true, max:tkMax*1.18, ticks:{callback:v=>realK(v)}, grid:{color:'rgba(213,229,216,.09)'}},
+              x:{grid:{display:false}}}}});
 
-  /* Tabela completa */
-  const linha = (x, estilo) => `<tr${estilo?` style="${estilo}"`:''}><td>${vfEsc_(x.n)}</td><td>${vfEsc_(x.cat)}</td>` +
+  /* Tabelas */
+  const cab = primeira => '<table><thead><tr><th>'+primeira+'</th><th class="r">Agend.</th><th class="r">Atend. faturados</th>' +
+    '<th class="r">Tutores</th><th class="r">Atend./tutor</th><th class="r">Receita</th><th class="r">% do fat.</th>' +
+    '<th class="r">Ticket/atend.</th><th class="r">Ticket/tutor</th></tr></thead><tbody>';
+  const linha = (x, estilo) => `<tr${estilo?` style="${estilo}"`:''}><td>${vfEsc_(x.n)}</td>` +
     `<td class="r">${x.ag?fmtN(x.ag):'-'}</td><td class="r">${x.af?fmtN(x.af):'-'}</td>` +
-    `<td class="r">${vfReais_(x.r)}</td><td class="r">${fmtP(pct(x.r))}</td>` +
-    `<td class="r">${x.af?vfReais_(x.r/x.af):'-'}</td></tr>`;
-  const profTab = prof.slice().sort((a,b)=>ordC(a.cat)-ordC(b.cat) || b.r-a.r);
-  let h = '<table><thead><tr><th>Profissional</th><th>Categoria</th><th class="r">Agend.</th><th class="r">Atend. faturados</th>' +
-          '<th class="r">Receita</th><th class="r">% do fat.</th><th class="r">Ticket/atend.</th></tr></thead><tbody>';
-  h += profTab.map(x=>linha(x)).join('');
-  h += linha({n:'Atribuído pela agenda', cat:'', ag:agT, af:afT, r:atr}, 'font-weight:700;border-top:1px solid rgba(213,229,216,.25)');
-  h += naL.map(x=>linha(x, 'opacity:.62')).join('');
-  h += linha({n:'Total do faturamento', cat:'', ag:null, af:null, r:tot}, 'font-weight:700;border-top:1px solid rgba(213,229,216,.25)');
+    `<td class="r">${x.tu?fmtN(x.tu):'-'}</td><td class="r">${x.af&&x.tu?dec(x.af/x.tu):'-'}</td>` +
+    `<td class="r">${real(x.r)}</td><td class="r">${fmtP(pct(x.r))}</td>` +
+    `<td class="r">${x.af?real(x.r/x.af):'-'}</td><td class="r">${x.tu?real(x.r/x.tu):'-'}</td></tr>`;
+  const SUB = 'font-weight:700;border-top:1px solid rgba(213,229,216,.25)';
+  const sec = t => `<tr class="vf-sec"><td colspan="9">${t}</td></tr>`;
+
+  let h = cab('Veterinária');
+  h += vets.map(x=>linha(x)).join('');
+  h += linha({n:'Veterinárias', ag:vAg, af:vAf, tu:vTu, r:vR}, SUB);
   h += '</tbody></table>';
   document.getElementById('vetfat-tw').innerHTML = h;
 
-  /* Leituras calculadas */
+  let g = cab('Profissional');
+  if(eqs.length){
+    g += sec('Equipes') + eqs.map(x=>linha(x)).join('');
+    g += linha({n:'Equipes', ag:soma(eqs,'ag'), af:eAf, tu:eTu, r:eR}, SUB);
+  }
+  if(esps.length){
+    g += sec('Especialistas') + esps.map(x=>linha(x)).join('');
+    g += linha({n:'Especialistas', ag:soma(esps,'ag'), af:soma(esps,'af'), tu:tutBloco('Especialistas', esps), r:soma(esps,'r')}, SUB);
+  }
+  g += sec('Fechamento com o faturamento');
+  g += linha({n:'Atribuído pela agenda (veterinárias + equipes + especialistas)', ag:agT, af:afT, tu:tutBloco('Atribuído pela agenda', prof), r:atr}, 'font-weight:700');
+  g += naL.map(x=>linha(x, 'opacity:.62')).join('');
+  g += linha({n:'Total do faturamento', ag:null, af:null, tu:null, r:tot}, SUB);
+  g += '</tbody></table>';
+  document.getElementById('vetfat-tw-eq').innerHTML = g;
+
+  /* Leituras calculadas: veterinárias */
   const cards = [];
-  const clin = prof.filter(x=>x.cat==='Clínica');
-  const top3 = prof.slice(0,3);
-  if(top3.length===3 && atr){
-    const s3 = top3.reduce((a,x)=>a+x.r,0);
-    cards.push(ic('info','Concentração',
-      `${top3.map(x=>vfEsc_(x.n.split(' ')[0])).join(', ')} somam <strong>${fmtP(s3/atr*100)}</strong> da receita atribuída pela agenda (${fmtRk(s3)} de ${fmtRk(atr)}).`));
-  }
-  const clinTk = clin.filter(x=>(x.af||0)>=10);
-  if(clinTk.length>=2){
-    const mx = clinTk.slice().sort((a,b)=>b.r/b.af-a.r/a.af)[0];
-    const tkClin = clinTk.reduce((a,x)=>a+x.r,0)/clinTk.reduce((a,x)=>a+x.af,0);
+  const base = vets.filter(x=>(x.af||0)>=10);
+  if(R && base.length>=2){
+    const topR = base.slice().sort((a,b)=>b.r-a.r)[0];
+    const maxT = base.slice().sort((a,b)=>(b.tu||0)-(a.tu||0))[0];
+    if(topR!==maxT && (topR.tu||0)<(maxT.tu||0)){
+      cards.push(ic('good','Menos tutores, mais receita',
+        `${vfEsc_(topR.n)} atendeu <strong>${fmtN(topR.tu)} tutores</strong>, ${fmtN(maxT.tu-topR.tu)} a menos que ${vfEsc_(nome1(maxT,vets))} (${fmtN(maxT.tu)}), e gerou <strong>${real(topR.r-maxT.r)} a mais</strong>. Ticket por tutor de ${real(topR.r/topR.tu)} contra ${real(maxT.r/maxT.tu)}.`));
+    } else {
+      cards.push(ic('info','Liderança',
+        `${vfEsc_(topR.n)} lidera em receita (${real(topR.r)}) e em tutores atendidos (${fmtN(topR.tu)}).`));
+    }
+    const rr = base.filter(x=>x.tu).map(x=>({x, k:x.af/x.tu})).sort((a,b)=>b.k-a.k);
+    if(rr.length>=2){
+      const a = rr[0], b = rr[rr.length-1];
+      cards.push(ic('info','Retorno no mês',
+        `${vfEsc_(nome1(a.x,vets))} atende cada tutor <strong>${dec(a.k)} vezes</strong> no mês, em média; ${vfEsc_(nome1(b.x,vets))}, ${dec(b.k)}. Ticket por tutor = ticket por atendimento × atendimentos por tutor: quanto mais retorno, maior a distância entre os dois tickets.`));
+    }
+    const mt = base.filter(x=>x.tu).sort((a,b)=>b.r/b.tu-a.r/a.tu)[0];
+    if(mt && vTu){
+      cards.push(ic('good','Maior ticket por tutor',
+        `${vfEsc_(mt.n)}: <strong>${real(mt.r/mt.tu)}</strong> por tutor, contra ${real(vR/vTu)} na média das veterinárias (${real(vR)} ÷ ${fmtN(vTu)} tutores${varios?', soma dos meses':' diferentes'}).`));
+    }
+  } else if(base.length>=2){
+    const mx = base.slice().sort((a,b)=>b.r/b.af-a.r/a.af)[0];
     cards.push(ic('good','Maior ticket na clínica',
-      `${vfEsc_(mx.n)} tem ticket de <strong>${vfReais_(mx.r/mx.af)}</strong> por atendimento, contra ${vfReais_(tkClin)} na média das veterinárias da clínica.`));
+      `${vfEsc_(mx.n)} tem ticket de <strong>${real(mx.r/mx.af)}</strong> por atendimento, contra ${real(vR/vAf)} na média das veterinárias.`));
   }
-  const conv = clin.filter(x=>(x.ag||0)>=10).map(x=>({x, t:x.af/x.ag})).sort((a,b)=>a.t-b.t);
+  const conv = vets.filter(x=>(x.ag||0)>=10).map(x=>({x, t:x.af/x.ag})).sort((a,b)=>a.t-b.t);
   if(conv.length){
     const m = conv[0], tp = m.t*100;
     cards.push(ic(tp<75?'warn':'info','Agenda sem venda',
-      `${vfEsc_(m.x.n)} teve ${fmtN(m.x.af)} de ${fmtN(m.x.ag)} agendamentos com venda (${fmtP(tp)}), a menor taxa da clínica. Agendamento sem venda pode ser retorno sem cobrança, falta ou venda feita em outro cadastro.`));
-  }
-  if(tot && naL.length){
-    const pNa = pct(naT), g = naL[0];
-    const nomeG = String(g.n).replace(/^Não atribuído\s*·\s*/,'');
-    cards.push(ic(pNa>35?'risk':pNa>20?'warn':'info','Fora da agenda',
-      `<strong>${fmtP(pNa)}</strong> do faturamento (${fmtRk(naT)}) não tem agendamento correspondente. O maior grupo é ${vfEsc_(nomeG)}, com ${fmtRk(g.r)}: plantão, internação e farmácia avulsa entram aqui.`));
+      `${vfEsc_(m.x.n)} teve ${fmtN(m.x.af)} de ${fmtN(m.x.ag)} agendamentos com venda (${fmtP(tp)}), a menor taxa entre as veterinárias. Agendamento sem venda pode ser retorno sem cobrança, falta ou venda feita em outro cadastro.`));
   }
   const ins = document.getElementById('vetfat-insights');
   ins.style.gridTemplateColumns = cards.length===4 ? 'repeat(2,1fr)' : '';
   ins.innerHTML = cards.join('');
 
+  /* Leituras calculadas: equipes e fechamento */
+  const ce = [];
+  if(eqs.length && atr){
+    ce.push(ic('info','Peso das equipes',
+      `Equipes somam <strong>${real(eR)}</strong> (${fmtP(eR/atr*100)} da receita atribuída pela agenda) em ${fmtN(eAf)} atendimentos. ` +
+      eqs.map(x=>`${vfEsc_(x.n)}: ${x.af?real(x.r/x.af)+' por atendimento':'sem atendimento faturado'}`).join('; ') + '.'));
+  }
+  if(tot && naL.length){
+    const pNa = pct(naT), g0 = naL[0];
+    const nomeG = String(g0.n).replace(/^Não atribuído\s*·\s*/,'');
+    ce.push(ic(pNa>35?'risk':pNa>20?'warn':'info','Fora da agenda',
+      `<strong>${fmtP(pNa)}</strong> do faturamento (${fmtRk(naT)}) não tem agendamento correspondente. O maior grupo é ${vfEsc_(nomeG)}, com ${fmtRk(g0.r)}: plantão, internação e farmácia avulsa entram aqui.`));
+  }
+  document.getElementById('vetfat-insights-eq').innerHTML = ce.join('');
+
   document.getElementById('vetfat-metodo').innerHTML =
     '\u2139 <strong>Como é calculado:</strong> cada item vendido vai para quem atendeu o paciente na agenda (mesmo dia ou dia seguinte, cruzando pelo telefone do tutor), e não para quem lançou o item no sistema. ' +
-    'Equipe Imagem e Bloco Cirúrgico são agendas de equipe. Quando o paciente passa por mais de um profissional no dia, imagem vai para a Equipe Imagem, cirurgia e anestesia para o Bloco, e o restante para quem fez a consulta. ' +
-    'Ticket = receita atribuída ÷ atendimentos faturados.';
+    'Quando o paciente passa por mais de um profissional no dia, imagem vai para a Equipe Imagem, cirurgia e anestesia para o Bloco, e o restante para quem fez a consulta. ' +
+    'Tutores = tutores diferentes com receita atribuída ao profissional. Os totais de tutores de cada bloco não são a soma das linhas: o mesmo tutor pode passar por uma veterinária e pela Equipe Imagem no mesmo mês.';
 }
 
 
